@@ -1,0 +1,28 @@
+{
+  "name": "QuanGan",
+  "version": "1.0.0",
+  "description": "QuanGan Agent",
+  "main": "dist/index.js",
+  "bin": {
+    "coding-agent": "./bin/coding-agent.js"
+  },
+  "scripts": {
+    "dev": "ts-node src/examples/basic-usage.ts",
+    "dev:agent": "ts-node src/examples/agent-usage.ts",
+    "cli": "ts-node src/cli/index.ts",
+    "build": "tsc",
+    "start": "node dist/examples/basic-usage.js"
+  },
+  "keywords": ["ai", "llm", "agent", "dashscope"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "dotenv": "^16.0.0"
+  }
+}

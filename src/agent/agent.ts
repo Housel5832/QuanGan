@@ -19,7 +19,7 @@ export interface AgentConfig {
  */
 export class Agent {
   private client: DashScopeClient;
-  private tools: Map<string, ToolRegistry> = new Map();
+  private tools: Map<string, ToolRegistry & { readonly: boolean }> = new Map();
   private messages: ChatMessage[] = [];
   private maxIterations: number;
   private verbose: boolean;
@@ -28,7 +28,7 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.client = config.client;
-    this.maxIterations = config.maxIterations || 10;
+    this.maxIterations = config.maxIterations || 50;
     this.verbose = config.verbose || false;
     this.onToolCall = config.onToolCall;
     this.onToolResult = config.onToolResult;
@@ -43,11 +43,13 @@ export class Agent {
 
   /**
    * 注册工具
+   * @param readonly 为 true 时该工具在 Plan 模式下也可被调用（读文件、搜索等安全操作）
    */
-  registerTool(definition: ToolDefinition, implementation: (args: any) => Promise<string> | string) {
+  registerTool(definition: ToolDefinition, implementation: (args: any) => Promise<string> | string, readonly = false) {
     this.tools.set(definition.function.name, {
       definition,
       implementation,
+      readonly,
     });
     
     if (this.verbose) {
@@ -56,10 +58,13 @@ export class Agent {
   }
 
   /**
-   * 获取所有工具定义
+   * 获取工具定义列表
+   * @param planOnly 为 true 时只返回 readonly 工具（Plan 模式下隐藏写操作工具）
    */
-  private getToolDefinitions(): ToolDefinition[] {
-    return Array.from(this.tools.values()).map(t => t.definition);
+  private getToolDefinitions(planOnly = false): ToolDefinition[] {
+    return Array.from(this.tools.values())
+      .filter(t => !planOnly || t.readonly)
+      .map(t => t.definition);
   }
 
   /**
@@ -112,8 +117,10 @@ export class Agent {
 
   /**
    * 运行 Agent
+   * @param userMessage 用户输入
+   * @param planOnly 为 true 时进入规划模式：不传工具给 LLM，只做分析和规划，不会执行任何操作
    */
-  async run(userMessage: string): Promise<string> {
+  async run(userMessage: string, planOnly = false): Promise<string> {
     // 添加用户消息
     this.messages.push({
       role: 'user',
@@ -129,6 +136,8 @@ export class Agent {
         console.log(`\n━━━━ 迭代 ${iteration} ━━━━`);
       }
       // 调用大模型
+      // planOnly 模式下只传只读工具，LLM 可以读文件/搜索，但无法写文件或执行命令
+      const tools = this.getToolDefinitions(planOnly);
       const response = await fetch(
         `${this.client.config.baseURL}/chat/completions`,
         {
@@ -140,7 +149,7 @@ export class Agent {
           body: JSON.stringify({
             model: this.client.config.model,
             messages: this.messages,
-            tools: this.getToolDefinitions(),
+            ...(tools.length > 0 ? { tools } : {}),
           }),
         }
       );
@@ -180,6 +189,14 @@ export class Agent {
     }
 
     throw new Error(`达到最大迭代次数 (${this.maxIterations})`);
+  }
+
+  /**
+   * 载入历史消息（用于恢复上次会话）
+   * 只接受 user / assistant / tool 消息，注入到 system prompt 之后
+   */
+  loadMessages(messages: ChatMessage[]): void {
+    this.messages.push(...messages);
   }
 
   /**

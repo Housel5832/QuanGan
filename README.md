@@ -24,7 +24,13 @@
 | `execute_command` | 执行 shell 命令（支持后台启动服务） |
 | `search_code` | 在代码库中搜索关键词（支持正则） |
 
-内置命令：`/help` `/history` `/tools` `/clear` `/exit`
+内置命令：`/help` `/history` `/tools` `/clear` `/plan` `/exec` `/exit`
+
+### 💾 会话持久化
+每次退出后对话记录自动保存，下次在同一目录启动时自动恢复，不同项目独立存档。
+
+### 📋 Plan 模式
+输入 `/plan` 进入规划模式：Agent 可以读取代码、搜索文件，但**不会写入任何文件**，最终输出结构化执行计划。确认后输入 `/exec` 切回执行模式，让 Agent 按计划执行。
 
 ---
 
@@ -88,13 +94,15 @@ src/
 ├── agent/           # Agent 核心（Function Calling 循环）
 ├── tools/           # 工具类型定义
 ├── cli/
-│   ├── tools/       # 每个工具一个文件，便于扩展
+│   ├── tools/       # 每个工具一个文件，readonly 标记控制 Plan 模式权限
+│   ├── session-store.ts  # 会话持久化（JSON 文件读写）
 │   ├── display.ts   # TUI 渲染（chalk + spinner）
 │   └── index.ts     # CLI 主入口
 ├── examples/        # 学习用示例代码
 bin/
 └── coding-agent.js  # 全局启动入口
 docs/                # 开发日志
+.sessions/           # 会话存档（自动生成，已 gitignore）
 ```
 
 ---
@@ -111,8 +119,9 @@ docs/                # 开发日志
 ## 后续计划
 
 - [ ] 浏览器操作工具
-- [ ] 更多 Agent 模式（Plan & Execute、ReAct 可视化）
-- [ ] 持久化记忆
+- [ ] ReAct 推理过程可视化
+- [x] Plan & Execute 模式
+- [x] 会话持久化
 - [ ] 更多等你来提 Issue
 
 ---

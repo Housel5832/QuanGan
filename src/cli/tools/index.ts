@@ -6,15 +6,15 @@ import * as searchCode from './search-code';
 
 /**
  * 所有 coding 工具的集合
- * 每个条目包含 definition（告诉 LLM 工具的描述和参数）
- * 和 implementation（实际执行逻辑）
+ * readonly: true  → 只读工具，Plan 模式下也允许使用（读文件、搜索等）
+ * readonly: false → 写操作工具，Plan 模式下隐藏，Agent 无法调用
  */
 export const ALL_CODING_TOOLS = [
-  { def: readFile.definition,       impl: readFile.implementation },
-  { def: writeFile.definition,      impl: writeFile.implementation },
-  { def: listDirectory.definition,  impl: listDirectory.implementation },
-  { def: executeCommand.definition, impl: executeCommand.implementation },
-  { def: searchCode.definition,     impl: searchCode.implementation },
+  { def: readFile.definition,       impl: readFile.implementation,       readonly: true  },
+  { def: writeFile.definition,      impl: writeFile.implementation,      readonly: false },
+  { def: listDirectory.definition,  impl: listDirectory.implementation,  readonly: true  },
+  { def: executeCommand.definition, impl: executeCommand.implementation, readonly: false },
+  { def: searchCode.definition,     impl: searchCode.implementation,     readonly: true  },
 ];
 
 // 也单独导出，方便按需引用

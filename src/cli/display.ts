@@ -29,12 +29,27 @@ export function printHelp(): void {
     ['/history', '查看当前会话历史'],
     ['/clear', '清空对话历史，重新开始'],
     ['/tools', '查看当前已加载的工具'],
+    ['/plan', '进入规划模式（只分析、不执行工具）'],
+    ['/exec', '退出规划模式，切回执行模式'],
     ['/exit', '退出程序'],
   ];
   cmds.forEach(([cmd, desc]) => {
     console.log(`  ${chalk.yellow(cmd.padEnd(10))} ${chalk.gray(desc)}`);
   });
   console.log('');
+}
+
+/**
+ * 打印模式切换提示
+ */
+export function printModeSwitch(isPlanMode: boolean): void {
+  if (isPlanMode) {
+    console.log('\n' + chalk.bgYellow.black.bold('  📋 Plan 模式  ') + chalk.yellow(' Agent 只会分析规划，不会执行任何工具'));
+    console.log(chalk.gray('  输入任务，Agent 会给出执行计划。确认后输入 /exec 切换到执行模式\n'));
+  } else {
+    console.log('\n' + chalk.bgCyan.black.bold('  ⚡ Exec 模式  ') + chalk.cyan(' Agent 可以调用工具执行操作'));
+    console.log(chalk.gray('  已切换回执行模式，输入 /plan 可再次进入规划模式\n'));
+  }
 }
 
 /**
@@ -91,9 +106,9 @@ export function printToolList(tools: string[]): void {
 /**
  * 打印会话历史记录
  */
-export function printHistory(messages: { role: string; content: string }[]): void {
-  // 过滤掉 system 消息，只展示对话部分
-  const dialogue = messages.filter(m => m.role === 'user' || m.role === 'assistant');
+export function printHistory(messages: { role: string; content: string; name?: string; tool_calls?: any[] }[]): void {
+  // 过滤掉 system 消息
+  const dialogue = messages.filter(m => m.role === 'user' || m.role === 'assistant' || m.role === 'tool');
 
   if (dialogue.length === 0) {
     console.log(chalk.gray('\n  (暂无对话历史)\n'));
@@ -104,18 +119,28 @@ export function printHistory(messages: { role: string; content: string }[]): voi
   console.log(DIVIDER);
 
   dialogue.forEach((msg, idx) => {
-    const isUser = msg.role === 'user';
-    const label = isUser
-      ? chalk.green.bold(`[${idx + 1}] You`)
-      : chalk.cyan.bold(`[${idx + 1}] Agent`);
-
-    // 内容超长时截断展示
     const maxLen = 200;
-    const content = msg.content.length > maxLen
-      ? msg.content.slice(0, maxLen) + chalk.gray(' ...')
-      : msg.content;
 
-    console.log(`${label}  ${chalk.white(content)}`);
+    if (msg.role === 'user') {
+      const content = msg.content.length > maxLen ? msg.content.slice(0, maxLen) + chalk.gray(' ...') : msg.content;
+      console.log(`${chalk.green.bold(`[${idx + 1}] You`)}  ${chalk.white(content)}`);
+
+    } else if (msg.role === 'assistant') {
+      if (msg.tool_calls?.length) {
+        // 这条是模型发出工具调用请求，展示调用了哪些工具
+        const names = msg.tool_calls.map((t: any) => chalk.yellow.bold(t.function?.name)).join(', ');
+        console.log(`${chalk.cyan.bold(`[${idx + 1}] Agent`)}  ${chalk.gray('🔧 调用工具:')} ${names}`);
+      } else {
+        const content = msg.content?.length > maxLen ? msg.content.slice(0, maxLen) + chalk.gray(' ...') : msg.content;
+        console.log(`${chalk.cyan.bold(`[${idx + 1}] Agent`)}  ${chalk.white(content)}`);
+      }
+
+    } else if (msg.role === 'tool') {
+      const content = msg.content.length > maxLen ? msg.content.slice(0, maxLen) + chalk.gray(' ...') : msg.content;
+      const toolName = msg.name ? chalk.yellow(msg.name) : chalk.yellow('tool');
+      console.log(`${chalk.blue.bold(`[${idx + 1}] Tool`)}  ${chalk.gray(`(${toolName})`)} ${chalk.gray(content)}`);
+    }
+
     if (idx < dialogue.length - 1) console.log('');
   });
 

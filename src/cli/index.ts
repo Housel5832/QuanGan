@@ -18,9 +18,11 @@ import {
   printHistory,
   printDivider,
   printError,
+  printModeSwitch,
   createSpinner,
 } from './display';
 import { ALL_CODING_TOOLS } from './tools';
+import { loadSession, saveSession, clearSession, getSessionFilePath } from './session-store';
 
 // ─── 初始化 ───────────────────────────────────────────────────────────────────
 
@@ -40,10 +42,33 @@ const agent = new Agent({
   },
 });
 
-// 注册所有 coding 工具
-ALL_CODING_TOOLS.forEach(({ def, impl }) => agent.registerTool(def, impl));
+// 注册所有 coding 工具（readonly 标记决定 Plan 模式下是否可用）
+ALL_CODING_TOOLS.forEach(({ def, impl, readonly }) => agent.registerTool(def, impl, readonly));
+
+// ─── 会话恢复 ─────────────────────────────────────────────────────────────────
+
+const CWD = process.cwd();
+const previousMessages = loadSession(CWD);
+if (previousMessages.length > 0) {
+  agent.loadMessages(previousMessages);
+}
 
 // ─── 命令处理 ─────────────────────────────────────────────────────────────────
+
+// Plan 模式标志：true 时 Agent 只规划不执行工具
+let isPlanMode = false;
+
+// readline 实例（在 handleCommand 中需要访问以更新 prompt）
+let rlInstance: ReturnType<typeof readline.createInterface> | null = null;
+
+function updatePrompt() {
+  if (!rlInstance) return;
+  const prompt = isPlanMode
+    ? '\x1b[33m[PLAN] >\x1b[0m '   // 黄色 [PLAN] > 提示符
+    : '\x1b[32m>\x1b[0m ';          // 绿色 > 提示符
+  rlInstance.setPrompt(prompt);
+  rlInstance.prompt();
+}
 
 function handleCommand(cmd: string): boolean {
   switch (cmd.trim()) {
@@ -52,6 +77,7 @@ function handleCommand(cmd: string): boolean {
       return true;
     case '/clear':
       agent.clearHistory();
+      clearSession(CWD);
       console.clear();
       printHeader(config.model);
       printSystem('对话历史已清空，重新开始！');
@@ -61,6 +87,16 @@ function handleCommand(cmd: string): boolean {
       return true;
     case '/tools':
       printToolList(ALL_CODING_TOOLS.map(t => t.def.function.name));
+      return true;
+    case '/plan':
+      isPlanMode = true;
+      printModeSwitch(true);
+      updatePrompt();
+      return true;
+    case '/exec':
+      isPlanMode = false;
+      printModeSwitch(false);
+      updatePrompt();
       return true;
     case '/exit':
     case '/quit':
@@ -80,6 +116,10 @@ async function main() {
   printHeader(config.model);
   printSystem('Coding Agent 已就绪！');
   printSystem(`工作目录: ${process.cwd()}`);
+  if (previousMessages.length > 0) {
+    printSystem(`已恢复上次会话（${previousMessages.filter((m: any) => m.role === 'user').length} 轮对话），输入 /clear 可重新开始`);
+    printHistory(agent.getHistory());
+  }
   printSystem('输入消息开始对话，/help 查看命令\n');
 
   // 创建 readline 接口
@@ -89,6 +129,7 @@ async function main() {
     prompt: '\x1b[32m>\x1b[0m ',
     terminal: true,
   });
+  rlInstance = rl;
 
   rl.prompt();
 
@@ -111,14 +152,34 @@ async function main() {
     // 打印用户消息
     printUserMessage(trimmed);
 
+    // Plan 模式下在用户消息前注入规划指令，引导 LLM 输出结构化计划
+    const messageToSend = isPlanMode
+      ? `[当前处于规划模式，你只能使用只读工具分析代码，禁止修改任何文件]
+
+请按以下步骤完成任务：
+1. 使用只读工具（read_file、list_directory、search_code）充分分析相关代码和文件
+2. 分析完成后，输出一份清晰的执行计划，格式如下：
+
+📋 执行计划
+Step 1: [具体操作描述]
+Step 2: [具体操作描述]
+...
+
+注意：只输出计划，不要真正修改文件。
+
+用户任务：${trimmed}`
+      : trimmed;
+
     // 暂停输入，显示 spinner
     rl.pause();
     const spinner = createSpinner('Agent 思考中...');
 
     try {
-      const response = await agent.run(trimmed);
+      const response = await agent.run(messageToSend, isPlanMode);
       spinner.stop();
       printAssistantMessage(response);
+      // 每次回复后自动保存，防止意外退出丢失记录
+      saveSession(CWD, agent.getHistory());
     } catch (e: any) {
       spinner.stop();
       printError(`调用失败: ${e.message}`);

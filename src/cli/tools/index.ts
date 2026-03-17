@@ -1,5 +1,6 @@
 import * as readFile from './read-file';
 import * as writeFile from './write-file';
+import * as editFile from './edit-file';
 import * as listDirectory from './list-directory';
 import * as executeCommand from './execute-command';
 import * as searchCode from './search-code';
@@ -12,10 +13,11 @@ import * as searchCode from './search-code';
 export const ALL_CODING_TOOLS = [
   { def: readFile.definition,       impl: readFile.implementation,       readonly: true  },
   { def: writeFile.definition,      impl: writeFile.implementation,      readonly: false },
+  { def: editFile.definition,       impl: editFile.implementation,       readonly: false },
   { def: listDirectory.definition,  impl: listDirectory.implementation,  readonly: true  },
   { def: executeCommand.definition, impl: executeCommand.implementation, readonly: false },
   { def: searchCode.definition,     impl: searchCode.implementation,     readonly: true  },
 ];
 
 // 也单独导出，方便按需引用
-export { readFile, writeFile, listDirectory, executeCommand, searchCode };
+export { readFile, writeFile, editFile, listDirectory, executeCommand, searchCode };

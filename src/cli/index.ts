@@ -3,7 +3,7 @@ import path from 'path';
 // 固定从 Agent 项目自身目录加载 .env，切换工作目录不会影响 Key 读取
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 import * as readline from 'readline';
-import { loadConfigFromEnv } from '../config/llm-config';
+import { loadConfigFromEnv, getModelContextLimit } from '../config/llm-config';
 import { DashScopeClient } from '../llm/client';
 import { Agent } from '../agent/agent';
 import {
@@ -19,6 +19,7 @@ import {
   printDivider,
   printError,
   printModeSwitch,
+  printTokenUsage,
   createSpinner,
 } from './display';
 import { ALL_CODING_TOOLS } from './tools';
@@ -28,6 +29,7 @@ import { loadSession, saveSession, clearSession, getSessionFilePath } from './se
 
 const config = loadConfigFromEnv();
 const client = new DashScopeClient(config);
+const MODEL_MAX_TOKENS = getModelContextLimit(config.model);
 
 const agent = new Agent({
   client,
@@ -39,6 +41,15 @@ const agent = new Agent({
   },
   onToolResult: (_name, result) => {
     printToolResult(result);
+  },
+  onCompressStart: () => {
+    // 直接打印提示行，等压缩完成后 onCompress 会打印结果
+    process.stdout.write(`\n  ${'\x1b[33m'}⏳ 上下文过长，正在压缩历史对话...${'\x1b[0m'}`);
+  },
+  onCompress: (before, after) => {
+    // 清除上面那行，换成完成提示
+    process.stdout.write('\r' + ' '.repeat(50) + '\r');
+    printSystem(`♻️  上下文已自动压缩（${before} → ${after} 条消息），旧对话已生成摘要保留`);
   },
 });
 
@@ -117,7 +128,8 @@ async function main() {
   printSystem('Coding Agent 已就绪！');
   printSystem(`工作目录: ${process.cwd()}`);
   if (previousMessages.length > 0) {
-    printSystem(`已恢复上次会话（${previousMessages.filter((m: any) => m.role === 'user').length} 轮对话），输入 /clear 可重新开始`);
+    const userCount = previousMessages.filter((m: any) => m.role === 'user').length;
+    printSystem(`已恢复上次会话（${userCount} 轮对话），输入 /clear 可重新开始`);
     printHistory(agent.getHistory());
   }
   printSystem('输入消息开始对话，/help 查看命令\n');
@@ -178,7 +190,10 @@ Step 2: [具体操作描述]
       const response = await agent.run(messageToSend, isPlanMode);
       spinner.stop();
       printAssistantMessage(response);
-      // 每次回复后自动保存，防止意外退出丢失记录
+      // 展示 token 用量进度条
+      const usage = agent.getTokenUsage();
+      printTokenUsage(usage.total, MODEL_MAX_TOKENS);
+      // 每次回复后自动保存（完整历史含 _archived 标记）
       saveSession(CWD, agent.getHistory());
     } catch (e: any) {
       spinner.stop();

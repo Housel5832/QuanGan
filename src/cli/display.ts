@@ -153,6 +153,29 @@ export function printDivider(): void {
 }
 
 /**
+ * 打印 token 用量进度条
+ * 示例：📊 Context  ████░░░░░░░░░░░  12,345 / 1,000,000 (1.2%)
+ */
+export function printTokenUsage(used: number, maxLimit: number): void {
+  if (used === 0) return;
+
+  const pct = used / maxLimit;
+  const BAR_LEN = 20;
+  const filled = Math.round(pct * BAR_LEN);
+  const empty = BAR_LEN - filled;
+
+  // 根据占比决定颜色：绿 → 黄 → 红
+  const barColor = pct < 0.5 ? chalk.green : pct < 0.8 ? chalk.yellow : chalk.red;
+  const bar = barColor('█'.repeat(filled)) + chalk.gray('░'.repeat(empty));
+
+  const usedStr  = used.toLocaleString();
+  const limitStr = maxLimit.toLocaleString();
+  const pctStr   = (pct * 100).toFixed(1) + '%';
+
+  console.log(`  ${chalk.gray('📊 Context')}  ${bar}  ${chalk.white(usedStr)} / ${chalk.gray(limitStr)} ${chalk.gray(`(${pctStr})`)}`);
+}
+
+/**
  * 打印错误信息
  */
 export function printError(msg: string): void {

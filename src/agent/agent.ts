@@ -12,6 +12,15 @@ export interface AgentConfig {
   verbose?: boolean;
   onToolCall?: (name: string, args: any) => void;
   onToolResult?: (name: string, result: string) => void;
+  /**
+   * token 压缩触发阈值（默认 16000）
+   * 每次 API 响应后，若 total_tokens 超过此值则自动压缩旧消息
+   */
+  compressionThreshold?: number;
+  /** 压缩发生时的回调，可用于在 TUI 中展示提示 */
+  onCompress?: (beforeCount: number, afterCount: number) => void;
+  /** 压缩开始前的回调，可用于在 TUI 中展示 loading 提示 */
+  onCompressStart?: () => void;
 }
 
 /**
@@ -20,11 +29,22 @@ export interface AgentConfig {
 export class Agent {
   private client: DashScopeClient;
   private tools: Map<string, ToolRegistry & { readonly: boolean }> = new Map();
+  /**
+   * 单数组存储所有消息（完整历史）
+   * _archived=true 的消息不发给 LLM，但保留供 /history 展示
+   * _summary=true 的消息是压缩摘要标记点
+   */
   private messages: ChatMessage[] = [];
   private maxIterations: number;
   private verbose: boolean;
   private onToolCall?: (name: string, args: any) => void;
   private onToolResult?: (name: string, result: string) => void;
+  /** 最近一次 API 响应的 token 用量 */
+  private lastTokenUsage: { prompt: number; completion: number; total: number } = { prompt: 0, completion: 0, total: 0 };
+  /** token 压缩触发阈值 */
+  private compressionThreshold: number;
+  private onCompress?: (beforeCount: number, afterCount: number) => void;
+  private onCompressStart?: () => void;
 
   constructor(config: AgentConfig) {
     this.client = config.client;
@@ -32,6 +52,9 @@ export class Agent {
     this.verbose = config.verbose || false;
     this.onToolCall = config.onToolCall;
     this.onToolResult = config.onToolResult;
+    this.compressionThreshold = config.compressionThreshold ?? 16_000;
+    this.onCompress = config.onCompress;
+    this.onCompressStart = config.onCompressStart;
 
     if (config.systemPrompt) {
       this.messages.push({
@@ -54,6 +77,116 @@ export class Agent {
     
     if (this.verbose) {
       console.log(`✓ 已注册工具: ${definition.function.name}`);
+    }
+  }
+
+  /**
+   * 从 messages 中派生 LLM 上下文（激进策略）
+   * 找到最近一条摘要消息，只取它之后的内容 + 系统提示
+   * 发送前剥离 _archived / _summary 元数据字段，LLM 看不到
+   */
+  private getLLMMessages(): ChatMessage[] {
+    const systemMsgs = this.messages.filter(m => m.role === 'system' && !m._summary);
+
+    // 找最近一条摘要的位置
+    let lastSummaryIdx = -1;
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      if (this.messages[i]._summary) { lastSummaryIdx = i; break; }
+    }
+
+    const contextMsgs = lastSummaryIdx >= 0
+      // 激进策略：只用最近一次摘要 + 其后的消息
+      ? this.messages.slice(lastSummaryIdx)
+      // 从未压缩过：过滤掉 _archived（理论上不存在，但保险起见）
+      : this.messages.filter(m => !m._archived && m.role !== 'system');
+
+    // 合并并剥离元数据字段，确保 API 收到干净的消息格式
+    return [...systemMsgs, ...contextMsgs].map(
+      ({ _archived: _a, _summary: _s, ...rest }) => rest as ChatMessage
+    );
+  }
+
+  /**
+   * 上下文压缩（滚动摘要）
+   * 旧消息打上 _archived 标记留在数组中（供 /history 展示），
+   * 在第一条"保留"消息前插入 _summary 摘要节点
+   */
+  private async compressContext(): Promise<void> {
+    const KEEP_RECENT = 6; // 保留最近 6 条（约 3 轮对话）
+
+    // 只对未归档的非 system 消息计数
+    const active = this.messages.filter(m => !m._archived && m.role !== 'system');
+    if (active.length <= KEEP_RECENT) return;
+
+    const toCompress = active.slice(0, active.length - KEEP_RECENT);
+    const toKeep     = active.slice(active.length - KEEP_RECENT);
+    const beforeCount = this.messages.length;
+
+    // 通知外部：压缩即将开始
+    this.onCompressStart?.();
+
+    // 调用大模型生成摘要
+    const summaryPrompt = toCompress
+      .map(m => {
+        const role = m.role === 'user' ? '用户' : m.role === 'assistant' ? 'Agent' : '工具';
+        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+        return `[${role}]: ${content.slice(0, 500)}`;
+      })
+      .join('\n\n');
+
+    const summaryResp = await fetch(
+      `${this.client.config.baseURL}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.client.config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: this.client.config.model,
+          messages: [
+            { role: 'system', content: '你是一个对话摘要助手，擅长从编程对话中提炼关键信息。' },
+            { role: 'user',   content: `请将以下对话历史压缩成简洁摘要（200字以内），重点保留：已读过的文件路径、做过的代码修改、重要结论。\n\n${summaryPrompt}` },
+          ],
+        }),
+      }
+    );
+
+    if (!summaryResp.ok) return; // 压缩失败则静默跳过
+
+    const summaryData = await summaryResp.json() as any;
+    const summary: string = summaryData.choices?.[0]?.message?.content ?? '';
+    if (!summary) return;
+
+    // 构造摘要标记节点
+    const summaryMsg: ChatMessage = {
+      role: 'system',
+      content: `[历史对话摘要 - 已自动压缩]\n${summary}`,
+      _summary: true,
+    };
+
+    // 原地修改 messages 数组：toCompress 打标记，摘要插到 toKeep 之前
+    const toCompressSet = new Set<ChatMessage>(toCompress);
+    const firstKeepRef  = toKeep[0];
+    const newMessages: ChatMessage[] = [];
+    let summaryInserted = false;
+
+    for (const msg of this.messages) {
+      // 在第一条"保留"消息前插入摘要
+      if (!summaryInserted && msg === firstKeepRef) {
+        newMessages.push(summaryMsg);
+        summaryInserted = true;
+      }
+      // 旧消息打归档标记
+      newMessages.push(toCompressSet.has(msg) ? { ...msg, _archived: true } : msg);
+    }
+    this.messages = newMessages;
+
+    const afterCount = active.length - toCompress.length + 1; // 摘要算 1 条
+    this.onCompress?.(beforeCount, afterCount);
+
+    if (this.verbose) {
+      console.log(`\n♻️  上下文已压缩: ${beforeCount} → ${afterCount} 条有效消息`);
     }
   }
 
@@ -121,11 +254,8 @@ export class Agent {
    * @param planOnly 为 true 时进入规划模式：不传工具给 LLM，只做分析和规划，不会执行任何操作
    */
   async run(userMessage: string, planOnly = false): Promise<string> {
-    // 添加用户消息
-    this.messages.push({
-      role: 'user',
-      content: userMessage,
-    });
+    // 添加用户消息到单数组（完整历史）
+    this.messages.push({ role: 'user', content: userMessage });
 
     let iteration = 0;
 
@@ -135,8 +265,7 @@ export class Agent {
       if (this.verbose) {
         console.log(`\n━━━━ 迭代 ${iteration} ━━━━`);
       }
-      // 调用大模型
-      // planOnly 模式下只传只读工具，LLM 可以读文件/搜索，但无法写文件或执行命令
+      // 调用大模型：发送派生出的 LLM 上下文（已过滤 archived，含最近摘要）
       const tools = this.getToolDefinitions(planOnly);
       const response = await fetch(
         `${this.client.config.baseURL}/chat/completions`,
@@ -148,7 +277,7 @@ export class Agent {
           },
           body: JSON.stringify({
             model: this.client.config.model,
-            messages: this.messages,
+            messages: this.getLLMMessages(),
             ...(tools.length > 0 ? { tools } : {}),
           }),
         }
@@ -159,9 +288,21 @@ export class Agent {
       }
 
       const data = await response.json() as any;
+      // 记录 token 用量（百炼每次响应都会返回 usage 字段）
+      if (data.usage) {
+        this.lastTokenUsage = {
+          prompt:     data.usage.prompt_tokens     ?? 0,
+          completion: data.usage.completion_tokens ?? 0,
+          total:      data.usage.total_tokens      ?? 0,
+        };
+        // token 超过阈值时自动压缩，下一轮迭代就能用压缩后的 messages
+        if (this.lastTokenUsage.total >= this.compressionThreshold) {
+          await this.compressContext();
+        }
+      }
       const choice = data.choices[0];
       const message = choice.message;
-      // 添加助手回复到历史
+      // 添加助手回复（同一个数组）
       this.messages.push(message);
 
       // 检查是否需要调用工具
@@ -193,14 +334,21 @@ export class Agent {
 
   /**
    * 载入历史消息（用于恢复上次会话）
-   * 只接受 user / assistant / tool 消息，注入到 system prompt 之后
+   * 包含完整记录（archived 消息也一并恢复）
    */
   loadMessages(messages: ChatMessage[]): void {
     this.messages.push(...messages);
   }
 
   /**
-   * 获取对话历史
+   * 获取最近一次 API 调用的 token 用量
+   */
+  getTokenUsage() {
+    return { ...this.lastTokenUsage };
+  }
+
+  /**
+   * 获取完整历史（含 _archived 旧消息，用于 /history 展示和存档）
    */
   getHistory(): ChatMessage[] {
     return [...this.messages];
@@ -210,7 +358,7 @@ export class Agent {
    * 清空对话历史（保留系统提示）
    */
   clearHistory() {
-    const systemMessages = this.messages.filter(m => m.role === 'system');
+    const systemMessages = this.messages.filter(m => m.role === 'system' && !m._summary);
     this.messages = systemMessages;
   }
 }

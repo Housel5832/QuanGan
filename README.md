@@ -42,8 +42,19 @@
 | `open_app` | 打开 macOS 应用程序（QQ音乐、微信等） |
 | `open_url` | 在浏览器中打开网址或搜索关键词 |
 | `run_shell` | 执行任意 shell 命令 |
+| `run_applescript` | 执行 AppleScript 脚本，自动化控制任意 macOS 应用（搜索歌曲、操作 UI 等） |
 
-内置命令：`/help` `/history` `/tools` `/clear` `/plan` `/exec` `/exit`
+内置命令：`/help` `/history` `/tools` `/clear` `/plan` `/exec` `/voice` `/exit`
+
+### 🎤 语音交互模式
+
+输入 `/voice` 进入语音模式，赋予全干哥「耳朵」和「嘴巴」：
+
+- **ASR（语音转文字）**：按 Enter 开始录音，静音自动停止，通过阿里云 Qwen3-ASR-Flash 识别为文字后传给 Agent
+- **TTS（文字转语音）**：Agent 回复后自动朗读，使用 macOS 内置 `say` 命令（Ting-Ting 声音），可随时中断
+- **可中断设计**：开始录音 / Ctrl+C 退出时立即停止当前朗读，不会录入自己的声音
+
+> 需要安装 [sox](https://sox.sourceforge.net/)（`brew install sox`）用于录音；ASR 需要 DashScope API Key
 
 ### 💾 会话持久化
 每次退出后对话记录自动保存，下次在同一目录启动时自动恢复，不同项目独立存档。
@@ -119,7 +130,8 @@ src/
 ├── agent/           # Agent 基类（通用 Function Calling 循环）
 ├── agents/
 │   ├── coding/      # Coding Agent 工厂 + 工具（read/write/exec 等）
-│   └── daily/       # Daily Agent 工厂 + 工具（open_app/open_url/run_shell）
+│   └── daily/       # Daily Agent 工厂 + 工具（open_app/open_url/run_shell/run_applescript）
+├── voice/           # 语音模块（ASR 识别 + TTS 朗读 + 录音）
 ├── tools/           # 工具类型定义
 ├── cli/
 │   ├── session-store.ts  # 会话持久化（JSON 文件读写）
@@ -157,6 +169,8 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 - [x] Plan & Execute 模式
 - [x] 会话持久化
 - [x] Token 用量展示 + 上下文自动压缩
+- [x] 语音交互模式（ASR + TTS，`/voice` 命令）
+- [x] Daily Agent AppleScript 工具（控制任意 macOS 应用）
 - [ ] Daily Agent 浏览器自动化（playwright）
 - [ ] ReAct 推理过程可视化
 - [ ] 更多等你来提 Issue
@@ -167,8 +181,11 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 
 - TypeScript + ts-node
 - 百炼 DashScope API（OpenAI 兼容）
+- Qwen3-ASR-Flash（语音识别）
 - chalk（终端颜色）
 - Node.js 内置 readline / child_process
+- sox（录音，需单独安装）
+- macOS `say` 命令（TTS 语音合成）
 
 ---
 

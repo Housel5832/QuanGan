@@ -21,8 +21,15 @@ import {
   printError,
   printModeSwitch,
   printTokenUsage,
+  printVoiceModeSwitch,
+  printRecordingStart,
+  printRecordingDone,
+  printVoiceTranscribed,
   createSpinner,
 } from './display';
+import { recordUntilSilence, cleanupAudioFile } from '../voice/recorder';
+import { transcribeAudio } from '../voice/asr';
+import { speakAsync, stopSpeaking } from '../voice/tts';
 import { createCodingAgent } from '../agents/coding';
 import { createDailyAgent } from '../agents/daily';
 import { ALL_CODING_TOOLS } from '../agents/coding/tools';
@@ -137,15 +144,22 @@ if (previousMessages.length > 0) {
 
 // Plan 模式标志：true 时 Agent 只规划不执行工具
 let isPlanMode = false;
+// Voice 模式标志：true 时按 Enter 开始录音，Agent 回复自动 TTS
+let isVoiceMode = false;
 
 // readline 实例（在 handleCommand 中需要访问以更新 prompt）
 let rlInstance: ReturnType<typeof readline.createInterface> | null = null;
 
 function updatePrompt() {
   if (!rlInstance) return;
-  const prompt = isPlanMode
-    ? '\x1b[33m[PLAN] >\x1b[0m '   // 黄色 [PLAN] > 提示符
-    : '\x1b[32m>\x1b[0m ';          // 绿色 > 提示符
+  let prompt: string;
+  if (isPlanMode) {
+    prompt = '\x1b[33m[PLAN] >\x1b[0m ';          // 黄色
+  } else if (isVoiceMode) {
+    prompt = '\x1b[35m[🎤 VOICE] Enter=录音 >\x1b[0m ';  // 紫色
+  } else {
+    prompt = '\x1b[32m>\x1b[0m ';                  // 绳色
+  }
   rlInstance.setPrompt(prompt);
   rlInstance.prompt();
 }
@@ -181,6 +195,11 @@ function handleCommand(cmd: string): boolean {
       printModeSwitch(false);
       updatePrompt();
       return true;
+    case '/voice':
+      isVoiceMode = !isVoiceMode;
+      printVoiceModeSwitch(isVoiceMode);
+      updatePrompt();
+      return true;
     case '/exit':
     case '/quit':
       printDivider();
@@ -193,6 +212,113 @@ function handleCommand(cmd: string): boolean {
 }
 
 // ─── 主入口 ───────────────────────────────────────────────────────────────────
+
+// ─── 公共处理逻辑：文字输入和语音输入共用 ─────────────────────────────────────
+
+/**
+ * 将用户消息交给 Agent 处理，并在语音模式下自动朗读回复
+ * 文字输入和语音输入共用这一函数，避免重复逻辑
+ */
+async function processUserMessage(
+  text: string,
+  rl: ReturnType<typeof readline.createInterface>,
+): Promise<void> {
+  // Plan 模式下在用户消息前注入规划指令，引导 LLM 输出结构化计划
+  const messageToSend = isPlanMode
+    ? `[当前处于规划模式，你只能使用只读工具分析代码，禁止修改任何文件]
+
+请按以下步骤完成任务：
+1. 使用只读工具（read_file、list_directory、search_code）充分分析相关代码和文件
+2. 分析完成后，输出一份清晰的执行计划，格式如下：
+
+📋 执行计划
+Step 1: [具体操作描述]
+Step 2: [具体操作描述]
+...
+
+注意：只输出计划，不要真正修改文件。
+
+用户任务：${text}`
+    : text;
+
+  rl.pause();
+  const spinner = createSpinner('Agent 思考中...');
+
+  try {
+    const response = await agent.run(messageToSend, isPlanMode);
+    spinner.stop();
+    printAssistantMessage(response);
+    // 展示 token 用量进度条
+    const usage = agent.getTokenUsage();
+    printTokenUsage(usage.total, MODEL_MAX_TOKENS);
+    // 每次回复后自动保存（完整历史含 _archived 标记）
+    saveSession(CWD, agent.getHistory());
+    // 语音模式下自动朗读回复
+    if (isVoiceMode) {
+      speakAsync(response);
+    }
+  } catch (e: any) {
+    spinner.stop();
+    printError(`调用失败: ${e.message}`);
+  }
+
+  rl.resume();
+  console.log('');
+  rl.prompt();
+}
+
+/**
+ * 语音输入处理：录音 → ASR 识别 → 交给 processUserMessage
+ */
+async function handleVoiceInput(
+  rl: ReturnType<typeof readline.createInterface>,
+): Promise<void> {
+  rl.pause();
+  // 开始录音前先停止正在进行的朗读，避免录到自己的声音
+  stopSpeaking();
+  printRecordingStart();
+
+  let audioFile = '';
+  try {
+    audioFile = await recordUntilSilence();
+  } catch (e: any) {
+    printRecordingDone();
+    printError(`录音失败: ${e.message}`);
+    rl.resume();
+    rl.prompt();
+    return;
+  }
+
+  printRecordingDone();
+  const spinner = createSpinner('语音识别中...');
+
+  let text = '';
+  try {
+    text = await transcribeAudio(audioFile, config.apiKey, config.baseURL);
+  } catch (e: any) {
+    spinner.stop();
+    printError(`ASR 失败: ${e.message}`);
+    cleanupAudioFile(audioFile);
+    rl.resume();
+    rl.prompt();
+    return;
+  } finally {
+    cleanupAudioFile(audioFile);
+  }
+
+  spinner.stop();
+
+  if (!text.trim()) {
+    printError('未识别到语音，请重试');
+    rl.resume();
+    rl.prompt();
+    return;
+  }
+
+  printVoiceTranscribed(text);
+  // 复用文字输入的处理流程（含 TTS）
+  await processUserMessage(text, rl);
+}
 
 async function main() {
   // 打印欢迎界面
@@ -221,9 +347,13 @@ async function main() {
   rl.on('line', async (input: string) => {
     const trimmed = input.trim();
 
-    // 空行忽略
+    // 空行：语音模式下触发录音，否则忽略
     if (!trimmed) {
-      rl.prompt();
+      if (isVoiceMode) {
+        await handleVoiceInput(rl);
+      } else {
+        rl.prompt();
+      }
       return;
     }
 
@@ -236,57 +366,25 @@ async function main() {
 
     // 打印用户消息
     printUserMessage(trimmed);
-
-    // Plan 模式下在用户消息前注入规划指令，引导 LLM 输出结构化计划
-    const messageToSend = isPlanMode
-      ? `[当前处于规划模式，你只能使用只读工具分析代码，禁止修改任何文件]
-
-请按以下步骤完成任务：
-1. 使用只读工具（read_file、list_directory、search_code）充分分析相关代码和文件
-2. 分析完成后，输出一份清晰的执行计划，格式如下：
-
-📋 执行计划
-Step 1: [具体操作描述]
-Step 2: [具体操作描述]
-...
-
-注意：只输出计划，不要真正修改文件。
-
-用户任务：${trimmed}`
-      : trimmed;
-
-    // 暂停输入，显示 spinner
-    rl.pause();
-    const spinner = createSpinner('Agent 思考中...');
-
-    try {
-      const response = await agent.run(messageToSend, isPlanMode);
-      spinner.stop();
-      printAssistantMessage(response);
-      // 展示 token 用量进度条
-      const usage = agent.getTokenUsage();
-      printTokenUsage(usage.total, MODEL_MAX_TOKENS);
-      // 每次回复后自动保存（完整历史含 _archived 标记）
-      saveSession(CWD, agent.getHistory());
-    } catch (e: any) {
-      spinner.stop();
-      printError(`调用失败: ${e.message}`);
-    }
-
-    // 恢复输入
-    rl.resume();
-    console.log('');
-    rl.prompt();
+    // 交给公共处理函数（文字输入路径）
+    await processUserMessage(trimmed, rl);
   });
 
   // Ctrl+C 优雅退出
   rl.on('close', () => {
+    stopSpeaking();  // 退出时立即终止朗读
     printDivider();
     printSystem('再见！👋');
     process.exit(0);
   });
 
   // 未捕获异常
+  // SIGINT (Ctrl+C) 时也确保停止朗读
+  process.on('SIGINT', () => {
+    stopSpeaking();
+    process.exit(0);
+  });
+
   process.on('uncaughtException', (e) => {
     printError(`未捕获异常: ${e.message}`);
     rl.prompt();

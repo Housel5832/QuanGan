@@ -7,7 +7,7 @@ const DIVIDER = chalk.gray('─'.repeat(56));
  */
 export function printHeader(model: string): void {
   console.log('\n' + chalk.cyan('═'.repeat(56)));
-  console.log(chalk.bold.cyan('  🤖  QuanGanGe · 全干哥'));
+  console.log(chalk.bold.magenta('  ✨  小玉 · 权哥的私人助理'));
   console.log(chalk.gray(`  powered by ${model}`));
   console.log(chalk.cyan('═'.repeat(56)) + '\n');
 }
@@ -64,7 +64,7 @@ export function printUserMessage(content: string): void {
  * 打印 Agent 最终回答
  */
 export function printAssistantMessage(content: string): void {
-  console.log(`\n${chalk.cyan.bold('Agent')} ${chalk.gray('›')} ${chalk.white(content)}`);
+  console.log(`\n${chalk.magenta.bold('\u5c0f\u7389')} ${chalk.gray('\u203a')} ${chalk.white(content)}`);
 }
 
 /**

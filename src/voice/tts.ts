@@ -1,10 +1,17 @@
 import { spawn, ChildProcess } from 'child_process';
+import { writeFileSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
+import WebSocket from 'ws';
 
-/** 当前正在运行的 say 子进程，用于随时中断朗读 */
+/** 当前正在运行的音频播放进程 */
 let currentProcess: ChildProcess | null = null;
+/** 当前正在进行的 WebSocket 合成连接 */
+let currentWs: WebSocket | null = null;
 
 /**
- * 立即停止当前正在进行的朗读
+ * 立即停止当前正在进行的朗读（播放 + WebSocket 合成）
  * 在开始录音、程序退出时调用
  */
 export function stopSpeaking(): void {
@@ -12,14 +19,151 @@ export function stopSpeaking(): void {
     currentProcess.kill('SIGTERM');
     currentProcess = null;
   }
+  if (currentWs) {
+    try { currentWs.close(); } catch { /* ignore */ }
+    currentWs = null;
+  }
 }
 
 /**
- * 使用 macOS 内置的 say 命令进行语音合成
- *
- * 中文声音选项（需在 macOS 系统偏好设置→辅助功能中下载）:
- *   Ting-Ting  - 普通话（默认推荐）
- * 如果系统没有这些声音，自动退回系统默认声音
+ * 读取当前配置的 TTS 模型和音色
+ * 优先使用 .env 中的 TTS_VOICE_ID / TTS_MODEL，
+ * 否则退回默认系统音色（cosyvoice-v3-flash + longanyang）
+ */
+function getTtsConfig(): { model: string; voice: string } {
+  const voiceId = process.env.TTS_VOICE_ID;
+  const model = process.env.TTS_MODEL;
+  if (voiceId && model) {
+    return { model, voice: voiceId };
+  }
+  // 默认：v3-flash 系统音色
+  return { model: 'cosyvoice-v3-flash', voice: 'longanyang' };
+}
+
+/**
+ * 用 CosyVoice 合成语音并播放
+ * 模型/音色从 .env 的 TTS_MODEL / TTS_VOICE_ID 读取，
+ * 支持随时通过 `npm run voice-design` 切换
+ */
+async function speakWithDashScope(text: string): Promise<void> {
+  const apiKey = process.env.DASHSCOPE_API_KEY;
+  if (!apiKey) throw new Error('DASHSCOPE_API_KEY 未设置');
+
+  const { model, voice } = getTtsConfig();
+  const taskId = randomUUID();
+  const wsUrl = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference';
+
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+
+    const ws = new WebSocket(wsUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    currentWs = ws;
+
+    ws.on('open', () => {
+      // 1. 发送 run-task 启动任务
+      ws.send(JSON.stringify({
+        header: { action: 'run-task', task_id: taskId, streaming: 'duplex' },
+        payload: {
+          task_group: 'audio',
+          task: 'tts',
+          function: 'SpeechSynthesizer',
+          model,
+          parameters: {
+            text_type: 'PlainText',
+            voice,
+            format: 'mp3',
+            sample_rate: 22050,
+            volume: 50,
+            rate: 1.0,
+            pitch: 1.0,
+          },
+          input: {},
+        },
+      }));
+    });
+
+    ws.on('message', (data: Buffer, isBinary: boolean) => {
+      // isBinary=true 才是真正的音频二进制帧
+      if (isBinary) {
+        chunks.push(data);
+        return;
+      }
+
+      // isBinary=false → JSON 控制事件
+      let msg: any;
+      try { msg = JSON.parse(data.toString()); } catch { return; }
+
+      const event: string = msg?.header?.event ?? '';
+
+      if (event === 'task-started') {
+        // 2. 任务就绪后发送文本
+        ws.send(JSON.stringify({
+          header: { action: 'continue-task', task_id: taskId, streaming: 'duplex' },
+          payload: { input: { text } },
+        }));
+        // 3. 立即发送结束信号（非流式场景一次性传完即可）
+        ws.send(JSON.stringify({
+          header: { action: 'finish-task', task_id: taskId, streaming: 'duplex' },
+          payload: { input: {} },
+        }));
+      } else if (event === 'task-finished') {
+        ws.close();
+      } else if (event === 'task-failed') {
+        ws.close();
+        reject(new Error(msg?.header?.error_message ?? 'CosyVoice TTS 失败'));
+      }
+    });
+
+    ws.on('close', async () => {
+      if (currentWs === ws) currentWs = null;
+
+      if (chunks.length === 0) {
+        resolve();
+        return;
+      }
+
+      // 4. 保存音频到临时文件并播放
+      const tmpFile = join(tmpdir(), `quangan-tts-${Date.now()}.mp3`);
+      try {
+        writeFileSync(tmpFile, Buffer.concat(chunks));
+        await playAudioFile(tmpFile);
+      } finally {
+        try { unlinkSync(tmpFile); } catch { /* ignore */ }
+      }
+      resolve();
+    });
+
+    ws.on('error', (err) => {
+      if (currentWs === ws) currentWs = null;
+      reject(err);
+    });
+  });
+}
+
+/**
+ * 用 afplay (macOS) 播放音频文件，持有进程引用以支持中断
+ */
+async function playAudioFile(filePath: string): Promise<void> {
+  return new Promise((resolve) => {
+    const proc = spawn('afplay', [filePath]);
+    currentProcess = proc;
+
+    proc.on('close', () => {
+      if (currentProcess === proc) currentProcess = null;
+      resolve();
+    });
+    proc.on('error', () => {
+      // afplay 不存在时静默跳过
+      if (currentProcess === proc) currentProcess = null;
+      resolve();
+    });
+  });
+}
+
+/**
+ * 主入口：先尝试 DashScope CosyVoice，失败时降级为 macOS say
  *
  * @param text 要朗读的文字
  */
@@ -27,12 +171,22 @@ export async function speak(text: string): Promise<void> {
   const cleanText = cleanForSpeech(text);
   if (!cleanText.trim()) return;
 
-  // 如果有上一句还在播放，先停掉
-  stopSpeaking();
+  stopSpeaking();  // 停止上一句
 
+  try {
+    await speakWithDashScope(cleanText);
+  } catch (err) {
+    // CosyVoice 失败（无网络、无 API Key 等）→ 降级为本地 say
+    await speakWithSay(cleanText);
+  }
+}
+
+/**
+ * 降级方案：macOS 内置 say 命令
+ */
+async function speakWithSay(text: string): Promise<void> {
   return new Promise((resolve) => {
-    const escaped = cleanText.replace(/"/g, '\\"');
-    // 优先用 Ting-Ting，失败时退回系统默认声音
+    const escaped = text.replace(/"/g, '\\"');
     const proc = spawn('say', ['-v', 'Ting-Ting', escaped]);
     currentProcess = proc;
 
@@ -40,9 +194,7 @@ export async function speak(text: string): Promise<void> {
       if (currentProcess === proc) currentProcess = null;
       resolve();
     });
-
     proc.on('error', () => {
-      // Ting-Ting 不存在时，退回系统默认声音
       const fallback = spawn('say', [escaped]);
       currentProcess = fallback;
       fallback.on('close', () => {
@@ -59,15 +211,12 @@ export async function speak(text: string): Promise<void> {
  * Agent 回复后调用此方法，让 CLI 仍可正常交互
  */
 export function speakAsync(text: string): void {
-  speak(text).catch(() => {
-    // TTS 失败不中断主流程
-  });
+  speak(text).catch(() => { /* TTS 失败不中断主流程 */ });
 }
 
 /**
  * 清理文本，使其更适合朗读：
- *   - 去除代码块（替换为"代码块"）
- *   - 去除行内代码、Markdown 标题/粗体/斜体/链接/URL
+ *   - 去除代码块、行内代码、Markdown 标记
  *   - 限制最多 400 字
  */
 export function cleanForSpeech(text: string): string {

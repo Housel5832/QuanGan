@@ -10,10 +10,16 @@
     "dev": "ts-node src/examples/basic-usage.ts",
     "dev:agent": "ts-node src/examples/agent-usage.ts",
     "cli": "ts-node src/cli/index.ts",
+    "voice-design": "ts-node src/voice/voice-design.ts",
     "build": "tsc",
     "start": "node dist/examples/basic-usage.js"
   },
-  "keywords": ["ai", "llm", "agent", "dashscope"],
+  "keywords": [
+    "ai",
+    "llm",
+    "agent",
+    "dashscope"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
@@ -22,7 +28,9 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "@types/ws": "^8.18.1",
     "chalk": "^4.1.2",
-    "dotenv": "^16.0.0"
+    "dotenv": "^16.0.0",
+    "ws": "^8.19.0"
   }
 }

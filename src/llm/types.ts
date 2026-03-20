@@ -9,6 +9,16 @@ export type MessageRole = 'system' | 'user' | 'assistant';
 export interface ChatMessage {
   role: MessageRole;
   content: string;
+  /**
+   * 已被压缩归档的旧消息，不发给 LLM，但保留在数组中供 /history 展示
+   * 发送给 LLM 前需要剥离此字段
+   */
+  _archived?: boolean;
+  /**
+   * 这是一条由压缩生成的摘要消息，标识上下文压缩发生的位置
+   * LLM 只会用到最近一条摘要
+   */
+  _summary?: boolean;
 }
 
 /**

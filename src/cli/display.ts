@@ -7,7 +7,7 @@ const DIVIDER = chalk.gray('─'.repeat(56));
  */
 export function printHeader(model: string): void {
   console.log('\n' + chalk.cyan('═'.repeat(56)));
-  console.log(chalk.bold.cyan('  🤖  Coding Agent'));
+  console.log(chalk.bold.magenta('  ✨  小玉 · 权哥的私人助理'));
   console.log(chalk.gray(`  powered by ${model}`));
   console.log(chalk.cyan('═'.repeat(56)) + '\n');
 }
@@ -31,6 +31,7 @@ export function printHelp(): void {
     ['/tools', '查看当前已加载的工具'],
     ['/plan', '进入规划模式（只分析、不执行工具）'],
     ['/exec', '退出规划模式，切回执行模式'],
+    ['/voice', '切换语音模式（Enter=录音，Agent 回复自动朗读）'],
     ['/exit', '退出程序'],
   ];
   cmds.forEach(([cmd, desc]) => {
@@ -63,7 +64,7 @@ export function printUserMessage(content: string): void {
  * 打印 Agent 最终回答
  */
 export function printAssistantMessage(content: string): void {
-  console.log(`\n${chalk.cyan.bold('Agent')} ${chalk.gray('›')} ${chalk.white(content)}`);
+  console.log(`\n${chalk.magenta.bold('\u5c0f\u7389')} ${chalk.gray('\u203a')} ${chalk.white(content)}`);
 }
 
 /**
@@ -148,8 +149,65 @@ export function printHistory(messages: { role: string; content: string; name?: s
 }
 
 
+/**
+ * 打印语音模式开关提示
+ */
+export function printVoiceModeSwitch(isVoice: boolean): void {
+  if (isVoice) {
+    console.log('\n' + chalk.bgMagenta.white.bold('  🎤 Voice 模式  ') + chalk.magenta(' 按 Enter 开始录音，Agent 回复将自动朗读'));
+    console.log(chalk.gray('  说话后静音 1.5s 自动识别，输入 /voice 可关闭语音模式\n'));
+  } else {
+    console.log('\n' + chalk.bgCyan.black.bold('  ⌨️  Text 模式   ') + chalk.cyan(' 已切换回文字输入模式'));
+    console.log(chalk.gray('  输入 /voice 可再次开启语音模式\n'));
+  }
+}
+
+/**
+ * 显示录音进行中的状态行（覆盖写，可被 printRecordingDone 清除）
+ */
+export function printRecordingStart(): void {
+  process.stdout.write(`\n  ${chalk.red('🔴')} ${chalk.red.bold('录音中...')} ${chalk.gray('（说话后静音 1.5s 自动停止，最长 10s）')}`);
+}
+
+/**
+ * 清除录音状态行
+ */
+export function printRecordingDone(): void {
+  process.stdout.write('\r' + ' '.repeat(60) + '\r');
+}
+
+/**
+ * 打印语音识别结果（紫色 🎤 You 前缀，与文字输入风格一致）
+ */
+export function printVoiceTranscribed(text: string): void {
+  console.log(`\n${chalk.magenta.bold('🎤 You')} ${chalk.gray('›')} ${chalk.white(text)}`);
+}
+
 export function printDivider(): void {
   console.log('\n' + DIVIDER + '\n');
+}
+
+/**
+ * 打印 token 用量进度条
+ * 示例：📊 Context  ████░░░░░░░░░░░  12,345 / 1,000,000 (1.2%)
+ */
+export function printTokenUsage(used: number, maxLimit: number): void {
+  if (used === 0) return;
+
+  const pct = used / maxLimit;
+  const BAR_LEN = 20;
+  const filled = Math.round(pct * BAR_LEN);
+  const empty = BAR_LEN - filled;
+
+  // 根据占比决定颜色：绿 → 黄 → 红
+  const barColor = pct < 0.5 ? chalk.green : pct < 0.8 ? chalk.yellow : chalk.red;
+  const bar = barColor('█'.repeat(filled)) + chalk.gray('░'.repeat(empty));
+
+  const usedStr  = used.toLocaleString();
+  const limitStr = maxLimit.toLocaleString();
+  const pctStr   = (pct * 100).toFixed(1) + '%';
+
+  console.log(`  ${chalk.gray('📊 Context')}  ${bar}  ${chalk.white(usedStr)} / ${chalk.gray(limitStr)} ${chalk.gray(`(${pctStr})`)}`);
 }
 
 /**

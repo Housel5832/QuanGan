@@ -21,15 +21,15 @@ export function getSessionFilePath(cwd: string): string {
 
 /**
  * 从磁盘加载会话历史
- * 返回 messages 数组，若文件不存在或解析失败则返回空数组
+ * 返回含 _archived/_summary 标记的单数组
  */
 export function loadSession(cwd: string): any[] {
   const filePath = getSessionFilePath(cwd);
   if (!fs.existsSync(filePath)) return [];
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const messages = JSON.parse(content);
-    return Array.isArray(messages) ? messages : [];
+    const data = JSON.parse(content);
+    return Array.isArray(data) ? data : [];
   } catch {
     return [];
   }
@@ -37,12 +37,14 @@ export function loadSession(cwd: string): any[] {
 
 /**
  * 将会话历史写入磁盘
- * 只保存 user / assistant / tool 消息，system prompt 每次启动时重新注入
+ * 保存完整的 messages 数组（含 _archived 旧消息，供下次启动恢复）
+ * system prompt 每次启动时重新注入，故只过滤非摘要的 system 消息
  */
 export function saveSession(cwd: string, messages: any[]): void {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   const filePath = getSessionFilePath(cwd);
-  const toSave = messages.filter(m => m.role !== 'system');
+  // 过滤原始 system prompt，保留 _summary 和普通角色消息
+  const toSave = messages.filter(m => m.role !== 'system' || m._summary);
   fs.writeFileSync(filePath, JSON.stringify(toSave, null, 2), 'utf-8');
 }
 

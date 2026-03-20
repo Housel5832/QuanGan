@@ -183,6 +183,8 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 - [x] 百炼 CosyVoice TTS 集成（定制音色，替代 macOS say）
 - [x] 交互式音色定制工具（`npm run voice-design`）
 - [x] Daily Agent AppleScript 工具（控制任意 macOS 应用）
+- [ ] 代码执行沙箱验证（Agent 写完代码后自动编译/运行验证正确性）
+- [ ] 终端输出代码片段显示文件名 + 行号（便于快速定位和复制）
 - [ ] Daily Agent 浏览器自动化（playwright）
 - [ ] ReAct 推理过程可视化
 - [ ] 更多等你来提 Issue

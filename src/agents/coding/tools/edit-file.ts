@@ -10,7 +10,7 @@ export const definition: ToolDefinition = {
   type: 'function',
   function: {
     name: 'edit_file',
-    description: '编辑文件内容，通过查找并替换指定文本来修改文件。适合局部修改，无需重写整个文件。',
+    description: '编辑文件内容，通过查找并替换指定文本，以此来修改文件。适合局部修改，无需重写整个文件。',
     parameters: {
       type: 'object',
       properties: {

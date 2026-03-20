@@ -31,6 +31,7 @@
 |------|----------|
 | `read_file` | 读取文件内容，支持指定行范围 |
 | `write_file` | 创建 / 覆盖写入文件 |
+| `edit_file` | 局部编辑文件，查找替换指定文本 |
 | `list_directory` | 列出目录结构 |
 | `execute_command` | 执行 shell 命令（支持后台启动服务） |
 | `search_code` | 在代码库中搜索关键词（支持正则） |

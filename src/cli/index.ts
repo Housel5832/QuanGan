@@ -35,6 +35,7 @@ import { createDailyAgent } from '../agents/daily';
 import { ALL_CODING_TOOLS } from '../agents/coding/tools';
 import { ALL_DAILY_TOOLS } from '../agents/daily/tools';
 import { loadSession, saveSession, clearSession } from './session-store';
+import { startCommandPicker } from './command-picker';
 
 // ─── 初始化 ───────────────────────────────────────────────────────────────────
 
@@ -156,6 +157,10 @@ if (previousMessages.length > 0) {
 let isPlanMode = false;
 // Voice 模式标志：true 时按 Enter 开始录音，Agent 回复自动 TTS
 let isVoiceMode = false;
+// Agent 运行中标志（ESC 中断时使用）
+let isAgentRunning = false;
+// 当前正在运行的 spinner（按 ESC 时需要立即停止并给出反馈）
+let currentSpinner: ReturnType<typeof createSpinner> | null = null;
 
 // readline 实例（在 handleCommand 中需要访问以更新 prompt）
 let rlInstance: ReturnType<typeof readline.createInterface> | null = null;
@@ -252,11 +257,13 @@ Step 2: [具体操作描述]
     : text;
 
   rl.pause();
-  const spinner = createSpinner('Agent 思考中...');
+  process.stdin.resume(); // 保持 stdin 流动，使 ESC 按键事件可以被捕获
+  isAgentRunning = true;
+  currentSpinner = createSpinner(`Agent 思考中...  \x1b[2m(Esc 可中断)\x1b[0m`);
 
   try {
     const response = await agent.run(messageToSend, isPlanMode);
-    spinner.stop();
+    if (currentSpinner) { currentSpinner.stop(); currentSpinner = null; }
     printAssistantMessage(response);
     // 展示 token 用量进度条
     const usage = agent.getTokenUsage();
@@ -268,8 +275,14 @@ Step 2: [具体操作描述]
       speakAsync(response);
     }
   } catch (e: any) {
-    spinner.stop();
-    printError(`调用失败: ${e.message}`);
+    if (currentSpinner) { currentSpinner.stop(); currentSpinner = null; }
+    if (e.message === '⚡ 已中断') {
+      printSystem('⚡ 调用已中断，可以继续输入');
+    } else {
+      printError(`调用失败: ${e.message}`);
+    }
+  } finally {
+    isAgentRunning = false;
   }
 
   rl.resume();
@@ -351,6 +364,35 @@ async function main() {
     terminal: true,
   });
   rlInstance = rl;
+
+  // ── 全局按键监听：ESC 中断 Agent + '/' 唤起命令选择器 ────────────────────
+  readline.emitKeypressEvents(process.stdin);
+  process.stdin.on('keypress', (str, key) => {
+    if (!key) return;
+
+    // 功能 1： ESC 中断当前 Agent 运行
+    if (key.name === 'escape' && isAgentRunning) {
+      // 立即停止 spinner、展示中断提示
+      if (currentSpinner) { currentSpinner.stop(); currentSpinner = null; }
+      process.stdout.write('\n');
+      printSystem('⚡ 中断中...');
+      agent.abort();
+      return;
+    }
+
+    // 功能 2： '/' 唤起命令选择器（仅当行内只有 '/' 且 Agent 未运行时）
+    if (str === '/' && !isAgentRunning && rl.line === '/') {
+      startCommandPicker(rl, (cmd) => {
+        if (cmd) {
+          console.log('');
+          handleCommand(cmd);
+          rl.prompt();
+        } else {
+          rl.prompt();
+        }
+      });
+    }
+  });
 
   rl.prompt();
 

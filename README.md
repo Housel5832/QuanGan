@@ -44,8 +44,13 @@
 | `open_url` | 在浏览器中打开网址或搜索关键词 |
 | `run_shell` | 执行任意 shell 命令 |
 | `run_applescript` | 执行 AppleScript 脚本，自动化控制任意 macOS 应用（搜索歌曲、操作 UI 等） |
+| `browser_action` | Playwright 浏览器自动化（navigate / click / type / 获取页面文本等），登录态持久化保存，首次登录后永久复用 |
 
 内置命令：`/help` `/history` `/tools` `/clear` `/plan` `/exec` `/voice` `/exit`
+
+**CLI 快捷交互：**
+- 输入 `/` 弹出命令选择菜单，↑↓ 导航，Enter 确认，ESC 取消
+- Agent 运行中按 `ESC` 立即中断当次调用（基于 AbortController，fetch 请求即时取消）
 
 ### 🎤 语音交互模式
 
@@ -135,13 +140,14 @@ src/
 ├── agent/           # Agent 基类（通用 Function Calling 循环）
 ├── agents/
 │   ├── coding/      # Coding Agent 工厂 + 工具（read/write/exec 等）
-│   └── daily/       # Daily Agent 工厂 + 工具（open_app/open_url/run_shell/run_applescript）
+│   └── daily/       # Daily Agent 工厂 + 工具（open_app/open_url/run_shell/run_applescript/browser_action）
 ├── voice/           # 语音模块（ASR 识别 + TTS 朗读 + 录音）
 ├── tools/           # 工具类型定义
 ├── cli/
 │   ├── session-store.ts  # 会话持久化（JSON 文件读写）
-│   ├── display.ts   # TUI 渲染（chalk + spinner）
-│   └── index.ts     # 小玉主 Agent 入口
+│   ├── display.ts        # TUI 渲染（chalk + spinner）
+│   ├── command-picker.ts # `/` 命令快捷选择菜单
+│   └── index.ts          # 小玉主 Agent 入口
 ├── voice/
 │   ├── tts.ts       # CosyVoice WebSocket TTS 合成
 │   ├── asr.ts       # Qwen3-ASR-Flash 语音识别
@@ -151,7 +157,7 @@ src/
 bin/
 └── coding-agent.js  # 全局启动入口
 docs/                # 开发日志
-skills/              # 自定义 Skill（dev-log-writer / developer-words-recorder）
+skills/              # 自定义 Skill（dev-log-writer / developer-words-recorder / daily-record）
 .sessions/           # 会话存档（自动生成，已 gitignore）
 ```
 
@@ -183,9 +189,11 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 - [x] 百炼 CosyVoice TTS 集成（定制音色，替代 macOS say）
 - [x] 交互式音色定制工具（`npm run voice-design`）
 - [x] Daily Agent AppleScript 工具（控制任意 macOS 应用）
+- [x] Daily Agent 浏览器自动化（Playwright，持久化登录态）
+- [x] CLI `/` 命令快捷选择菜单
+- [x] ESC 中断 Agent 调用（AbortController 即时取消）
 - [ ] 代码执行沙箱验证（Agent 写完代码后自动编译/运行验证正确性）
 - [ ] 终端输出代码片段显示文件名 + 行号（便于快速定位和复制）
-- [ ] Daily Agent 浏览器自动化（playwright）
 - [ ] ReAct 推理过程可视化
 - [ ] 更多等你来提 Issue
 

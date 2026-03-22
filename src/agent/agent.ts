@@ -45,6 +45,10 @@ export class Agent {
   private compressionThreshold: number;
   private onCompress?: (beforeCount: number, afterCount: number) => void;
   private onCompressStart?: () => void;
+  /** ESC 中断标志 */
+  private _aborted = false;
+  /** 用于立即取消当前 in-flight fetch 请求 */
+  private _abortController: AbortController | null = null;
 
   constructor(config: AgentConfig) {
     this.client = config.client;
@@ -249,17 +253,34 @@ export class Agent {
   }
 
   /**
+   * 中断当前正在运行的 run()
+   * 同时取消 in-flight fetch，无需等待 LLM 响应返回
+   */
+  abort(): void {
+    this._aborted = true;
+    this._abortController?.abort();
+  }
+
+  /**
    * 运行 Agent
    * @param userMessage 用户输入
    * @param planOnly 为 true 时进入规划模式：不传工具给 LLM，只做分析和规划，不会执行任何操作
    */
   async run(userMessage: string, planOnly = false): Promise<string> {
+    this._aborted = false;          // 每次运行前重置
+    this._abortController = null;     // 清空上一次的 controller
     // 添加用户消息到单数组（完整历史）
     this.messages.push({ role: 'user', content: userMessage });
 
     let iteration = 0;
 
     while (iteration < this.maxIterations) {
+      // 每论迭代开头检查中断标志
+      if (this._aborted) {
+        this._aborted = false;
+        throw new Error('⚡ 已中断');
+      }
+
       iteration++;
 
       if (this.verbose) {
@@ -267,21 +288,34 @@ export class Agent {
       }
       // 调用大模型：发送派生出的 LLM 上下文（已过滤 archived，含最近摘要）
       const tools = this.getToolDefinitions(planOnly);
-      const response = await fetch(
-        `${this.client.config.baseURL}/chat/completions`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.client.config.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: this.client.config.model,
-            messages: this.getLLMMessages(),
-            ...(tools.length > 0 ? { tools } : {}),
-          }),
+      // 每次 fetch 前创建新的 AbortController，供 abort() 取消
+      this._abortController = new AbortController();
+      let response: Response;
+      try {
+        response = await fetch(
+          `${this.client.config.baseURL}/chat/completions`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${this.client.config.apiKey}`,
+            },
+            body: JSON.stringify({
+              model: this.client.config.model,
+              messages: this.getLLMMessages(),
+              ...(tools.length > 0 ? { tools } : {}),
+            }),
+            signal: this._abortController.signal,
+          }
+        );
+      } catch (err: any) {
+        // fetch 被 AbortController 取消（ESC 中断）
+        if (err.name === 'AbortError' || this._aborted) {
+          this._aborted = false;
+          throw new Error('⚡ 已中断');
         }
-      );
+        throw err;
+      }
 
       if (!response.ok) {
         throw new Error(`API 调用失败: ${response.status}`);

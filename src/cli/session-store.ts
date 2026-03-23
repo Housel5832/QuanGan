@@ -49,11 +49,19 @@ export function saveSession(cwd: string, messages: any[]): void {
 }
 
 /**
- * 删除会话文件（/clear 命令时调用）
+ * 归档当前会话文件，开启新对话（/clear 命令时调用）
+ * 不删除旧文件，而是重命名为带时间戳的归档文件，保留历史记录
+ * 归档格式：<项目名>-<hash>-archive-YYYY-MM-DDTHH-MM-SS.json
  */
-export function clearSession(cwd: string): void {
+export function clearSession(cwd: string): string | null {
   const filePath = getSessionFilePath(cwd);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
+  if (!fs.existsSync(filePath)) return null;
+
+  const timestamp = new Date()
+    .toISOString()
+    .replace(/[:.]/g, '-')
+    .slice(0, 19); // "2026-03-22T14-30-00"
+  const archivePath = filePath.replace(/\.json$/, `-archive-${timestamp}.json`);
+  fs.renameSync(filePath, archivePath);
+  return path.basename(archivePath);
 }

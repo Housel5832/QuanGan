@@ -27,7 +27,7 @@ export function printHelp(): void {
   const cmds: [string, string][] = [
     ['/help', '显示帮助信息'],
     ['/history', '查看当前会话历史'],
-    ['/clear', '清空对话历史，重新开始'],
+    ['/clear', '归档当前对话，开启新对话（旧记录保留）'],
     ['/tools', '查看当前已加载的工具'],
     ['/plan', '进入规划模式（只分析、不执行工具）'],
     ['/exec', '退出规划模式，切回执行模式'],

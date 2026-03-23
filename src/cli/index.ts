@@ -210,13 +210,17 @@ function handleCommand(cmd: string): boolean {
     case '/help':
       printHelp();
       return true;
-    case '/clear':
+    case '/clear': {
       agent.clearHistory();
-      clearSession(CWD);
+      const archivedFile = clearSession(CWD);
       console.clear();
       printHeader(config.model);
-      printSystem('对话历史已清空，重新开始！');
+      if (archivedFile) {
+        printSystem(`📦 旧对话已归档：${archivedFile}`);
+      }
+      printSystem('已开启新对话，旧记录保留在 .sessions/ 目录中');
       return true;
+    }
     case '/history':
       printHistory(agent.getHistory());
       return true;

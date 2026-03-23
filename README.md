@@ -43,7 +43,7 @@
 |------|----------|
 | `open_app` | 打开 macOS 应用程序（QQ音乐、微信等） |
 | `open_url` | 在浏览器中打开网址或搜索关键词 |
-| `run_shell` | 执行任意 shell 命令 |
+| `run_shell` | 执行任意 shell 命令；内置网易云 ncm-cli 优先策略，播放/搜索音乐直接调用 ncm-cli，无需手动探索命令格式 |
 | `run_applescript` | 执行 AppleScript 脚本，自动化控制任意 macOS 应用（搜索歌曲、操作 UI 等） |
 | `browser_action` | Playwright 浏览器自动化（navigate / click / type / 获取页面文本等），登录态持久化保存，首次登录后永久复用 |
 
@@ -65,7 +65,7 @@
 > 需要安装 [sox](https://sox.sourceforge.net/)（`brew install sox`）用于录音；ASR 和 TTS 均需要 DashScope API Key
 
 ### 💾 会话持久化
-每次退出后对话记录自动保存，下次在同一目录启动时自动恢复，不同项目独立存档。
+每次退出后对话记录自动保存，下次在同一目录启动时自动恢复，不同项目独立存档。输入 `/clear` 会将当前对话**归档**（带时间戳重命名保留）并开启新对话，旧记录不会丢失，保存在 `.sessions/` 目录中。
 
 ### 📋 Plan 模式
 输入 `/plan` 进入规划模式：Agent 可以读取代码、搜索文件，但**不会写入任何文件**，最终输出结构化执行计划。确认后输入 `/exec` 切回执行模式，让 Agent 按计划执行。
@@ -195,6 +195,8 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 - [x] ESC 中断 Agent 调用（AbortController 即时取消）
 - [x] Coding Agent 路径安全守卫（危险命令越界自动拦截 + y/N 确认）
 - [x] `verify_code` 编译验证工具（tsc --noEmit，Agent 写完代码后自检）
+- [x] `/clear` 归档化（旧对话带时间戳归档保留，不再直接删除）
+- [x] Daily Agent 提示词策略化（移除内联实现细节，提示词只管优先级）
 - [ ] 终端输出代码片段显示文件名 + 行号（便于快速定位和复制）
 - [ ] ReAct 推理过程可视化
 - [ ] 更多等你来提 Issue

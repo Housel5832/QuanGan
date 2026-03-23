@@ -23,7 +23,7 @@ interface CommandEntry {
 export const PICKER_COMMANDS: CommandEntry[] = [
   { cmd: '/help',    desc: '显示帮助信息' },
   { cmd: '/history', desc: '查看会话历史' },
-  { cmd: '/clear',   desc: '清空对话，重新开始' },
+  { cmd: '/clear',   desc: '归档当前对话，开启新对话（旧记录保留）' },
   { cmd: '/tools',   desc: '查看已加载工具' },
   { cmd: '/plan',    desc: '进入规划模式（只分析不执行）' },
   { cmd: '/exec',    desc: '退出规划模式，切回执行' },

@@ -36,7 +36,7 @@ import { ALL_CODING_TOOLS } from '../agents/coding/tools';
 import { ALL_DAILY_TOOLS } from '../agents/daily/tools';
 import { loadSession, saveSession, clearSession } from './session-store';
 import { startCommandPicker } from './command-picker';
-import { createMemoryTools, getCoreMemory, appendLifeMemory, createMemoryToolImpls } from '../memory';
+import { createMemoryTools, getCoreMemory, appendLifeMemory, createMemoryToolImpls, MEMORY_BASE_DIR } from '../memory';
 
 // ─── 初始化 ───────────────────────────────────────────────────────────────────
 
@@ -48,7 +48,8 @@ const CWD = process.cwd();
 // ─── 记忆系统初始化 ──────────────────────────────────────────────────────────
 
 // 读取 coreMemory，启动时注入到系统提示词
-const _initCoreMemory = getCoreMemory(CWD);
+// 注意：记忆属于小玉自身，存储在 QuanGan 项目目录，与用户当前工作目录无关
+const _initCoreMemory = getCoreMemory(MEMORY_BASE_DIR);
 const _memoryContext =
   _initCoreMemory.memories.length > 0
     ? `\n\n## 你的核心记忆\n${_initCoreMemory.memories.map(m => `- [强度:${m.reinforceCount}] ${m.content}`).join('\n')}`
@@ -132,12 +133,12 @@ async function updateLifeMemoryAsync(): Promise<void> {
       '只输出主题词，不要其他内容。',
     );
 
-    appendLifeMemory(CWD, theme.trim(), summary);
+    appendLifeMemory(MEMORY_BASE_DIR, theme.trim(), summary);
 
     _lifeMemoryUpdateCount++;
     // 每 3 次压缩就触发一次核心记忆整合
     if (_lifeMemoryUpdateCount % 3 === 0) {
-      const { consolidateImpl } = createMemoryToolImpls(client, CWD);
+      const { consolidateImpl } = createMemoryToolImpls(client, MEMORY_BASE_DIR);
       await consolidateImpl();
     }
   } catch {
@@ -214,7 +215,7 @@ agent.registerTool(dailyAgentToolDef, async (args: { task: string }) => {
 });
 
 // 注册记忆工具：recall_memory / update_life_memory / consolidate_core_memory
-const memoryTools = createMemoryTools(client, CWD);
+const memoryTools = createMemoryTools(client, MEMORY_BASE_DIR);
 memoryTools.forEach(({ def, impl, readonly }) => agent.registerTool(def, impl, readonly));
 
 // ─── 会话恢复 ─────────────────────────────────────────────────────────────────

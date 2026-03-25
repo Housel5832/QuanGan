@@ -6,7 +6,7 @@ import {
   createMemoryToolImpls,
 } from './tools';
 
-export { getCoreMemory, appendLifeMemory, getRecentLifeMemories } from './memory-store';
+export { getCoreMemory, appendLifeMemory, getRecentLifeMemories, MEMORY_BASE_DIR } from './memory-store';
 export type { CoreMemoryData, CoreMemoryItem } from './memory-store';
 export { createMemoryToolImpls } from './tools';
 

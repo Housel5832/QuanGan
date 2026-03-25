@@ -1,6 +1,12 @@
 import fs from 'fs';
 import path from 'path';
 
+/**
+ * 小玉自身的记忆目录，固定在 QuanGan 项目根目录下（与当前工作目录无关）
+ * 类似 session-store 的 SESSIONS_DIR 设计
+ */
+export const MEMORY_BASE_DIR = path.resolve(__dirname, '../../.memory');
+
 // ─── 数据结构 ─────────────────────────────────────────────────────────────────
 
 export interface CoreMemoryItem {

@@ -214,7 +214,7 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 - [x] `verify_code` 编译验证工具（tsc --noEmit，Agent 写完代码后自检）
 - [x] `/clear` 归档化（旧对话带时间戳归档保留，不再直接删除）
 - [x] Daily Agent 提示词策略化（移除内联实现细节，提示词只管优先级）
-- [x] Agent 两层记忆系统（coreMemory 长期记忆 + lifeMemory 每日日记，压缩时自动更新）
+- [x] Agent 两层记忆系统（coreMemory 长期记忆 + lifeMemory 每日日记，压缩时自动更新，记忆存储在 QuanGan 全局目录，跨项目共享）
 - [ ] 终端输出代码片段显示文件名 + 行号（便于快速定位和复制）
 - [ ] ReAct 推理过程可视化
 - [ ] 更多等你来提 Issue

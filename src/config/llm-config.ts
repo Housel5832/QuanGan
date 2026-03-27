@@ -7,20 +7,34 @@ export interface LLMConfig {
   apiKey: string;
   baseURL: string;
   model: string;
+  /** 额外请求头（部分供应商需要特定 Header 才能通过白名单） */
+  headers?: Record<string, string>;
+  /** 调用协议: openai = OpenAI 兼容（默认）; anthropic = Anthropic Messages API */
+  protocol?: 'openai' | 'anthropic';
 }
 
 /**
  * 内置供应商预设（baseURL + 默认模型）
  * 添加新厂商只需在此注册一条
  */
-export const PROVIDERS: Record<string, { baseURL: string; defaultModel: string }> = {
+export const PROVIDERS: Record<string, { baseURL: string; defaultModel: string; headers?: Record<string, string>; protocol?: 'openai' | 'anthropic' }> = {
   dashscope: {
     baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     defaultModel: 'qwen-plus',
   },
   kimi: {
+    // Moonshot 开放平台（普通 API Key，来自 platform.moonshot.cn）
     baseURL: 'https://api.moonshot.cn/v1',
-    defaultModel: 'kimi2.5',
+    defaultModel: 'kimi-k2.5',
+  },
+  'kimi-code': {
+    // Kimi for Coding 订阅制 API（key 来自 kimi.com/code，以 sk-kimi- 开头）
+    // 使用 Anthropic Messages API 协议，非 OpenAI 兼容
+    // 白名单校验：必须传 User-Agent: claude-code/0.1.0
+    baseURL: 'https://api.kimi.com/coding/v1',
+    defaultModel: 'k2p5',
+    headers: { 'User-Agent': 'claude-code/0.1.0' },
+    protocol: 'anthropic',
   },
   openai: {
     baseURL: 'https://api.openai.com/v1',
@@ -39,11 +53,15 @@ export const MODEL_CONTEXT_LIMITS: Record<string, number> = {
   'qwen-plus':                  131_072,
   'qwen-max':                    32_768,
   'qwen-max-longcontext':        28_672,
-  // Kimi / Moonshot
-  'kimi2.5':                    128_000,
-  'moonshot-v1-8k':               8_192,
-  'moonshot-v1-32k':             32_768,
-  'moonshot-v1-128k':           128_000,
+  // Kimi
+  'k2p5':                   262_144,
+  'kimi-k2-thinking':       262_144,
+  'kimi-k2.5':              256_000,
+  'kimi-k2-turbo-preview':  256_000,
+  'kimi-for-coding':        256_000,
+  'moonshot-v1-8k':           8_192,
+  'moonshot-v1-32k':         32_768,
+  'moonshot-v1-128k':       128_000,
   // OpenAI
   'gpt-4o':                     128_000,
   'gpt-4o-mini':                128_000,
@@ -70,13 +88,15 @@ export function getModelContextLimit(model: string): number {
 export function loadConfigFromEnv(): LLMConfig {
   const provider = (process.env.LLM_PROVIDER || 'dashscope').toLowerCase();
   const preset = PROVIDERS[provider] ?? PROVIDERS.dashscope;
-  const prefix = provider.toUpperCase();
+  const prefix = provider.replace(/-/g, '_').toUpperCase();
 
   return {
     provider,
-    apiKey:  process.env[`${prefix}_API_KEY`]  || process.env.DASHSCOPE_API_KEY || '',
-    baseURL: process.env[`${prefix}_BASE_URL`] || preset.baseURL,
-    model:   process.env[`${prefix}_MODEL`]    || preset.defaultModel,
+    apiKey:   process.env[`${prefix}_API_KEY`]  || process.env.DASHSCOPE_API_KEY || '',
+    baseURL:  process.env[`${prefix}_BASE_URL`] || preset.baseURL,
+    model:    process.env[`${prefix}_MODEL`]    || preset.defaultModel,
+    headers:  preset.headers,
+    protocol: preset.protocol,
   };
 }
 
@@ -95,5 +115,6 @@ export function createConfig(
     apiKey,
     baseURL: baseURL || preset.baseURL,
     model:   model   || preset.defaultModel,
+    headers: preset.headers,
   };
 }

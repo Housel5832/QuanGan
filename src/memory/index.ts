@@ -1,4 +1,4 @@
-import { DashScopeClient } from '../llm/client';
+import { ILLMClient } from '../llm/types';
 import {
   recallMemoryDef,
   updateLifeMemoryDef,
@@ -15,7 +15,7 @@ export { createMemoryToolImpls } from './tools';
  * @param client LLM 客户端（consolidate 工具需要调用 LLM）
  * @param cwd 项目目录（记忆文件存储位置）
  */
-export function createMemoryTools(client: DashScopeClient, cwd: string) {
+export function createMemoryTools(client: ILLMClient, cwd: string) {
   const { recallImpl, updateLifeImpl, consolidateImpl } = createMemoryToolImpls(client, cwd);
   return [
     { def: recallMemoryDef,         impl: recallImpl,      readonly: true  },

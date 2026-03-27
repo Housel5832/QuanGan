@@ -27,8 +27,9 @@ export const PICKER_COMMANDS: CommandEntry[] = [
   { cmd: '/tools',   desc: '查看已加载工具' },
   { cmd: '/plan',    desc: '进入规划模式（只分析不执行）' },
   { cmd: '/exec',    desc: '退出规划模式，切回执行' },
-  { cmd: '/voice',   desc: '切换语音模式' },
-  { cmd: '/exit',    desc: '退出程序' },
+  { cmd: '/voice',    desc: '切换语音模式' },
+  { cmd: '/provider', desc: '切换模型供应商（dashscope / kimi / openai）' },
+  { cmd: '/exit',     desc: '退出程序' },
 ];
 
 /** 菜单占用的总行数（header + 每条命令） */

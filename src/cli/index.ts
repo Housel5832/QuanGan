@@ -1,10 +1,13 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import * as fs from 'fs';
+// .env 文件的绝对路径，供持久化写入使用
+const ENV_FILE = path.resolve(__dirname, '../../.env');
 // 固定从 Agent 项目自身目录加载 .env，切换工作目录不会影响 Key 读取
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 import * as readline from 'readline';
-import { loadConfigFromEnv, getModelContextLimit } from '../config/llm-config';
-import { DashScopeClient } from '../llm/client';
+import { loadConfigFromEnv, getModelContextLimit, PROVIDERS } from '../config/llm-config';
+import { DashScopeClient, LLMClient, createLLMClient } from '../llm/client';
 import { Agent } from '../agent/agent';
 import { ToolDefinition } from '../tools/types';
 import {
@@ -40,9 +43,9 @@ import { createMemoryTools, getCoreMemory, appendLifeMemory, createMemoryToolImp
 
 // ─── 初始化 ───────────────────────────────────────────────────────────────────
 
-const config = loadConfigFromEnv();
-const client = new DashScopeClient(config);
-const MODEL_MAX_TOKENS = getModelContextLimit(config.model);
+let config = loadConfigFromEnv();
+let client = createLLMClient(config);
+let MODEL_MAX_TOKENS = getModelContextLimit(config.model);
 const CWD = process.cwd();
 
 // ─── 记忆系统初始化 ──────────────────────────────────────────────────────────
@@ -276,6 +279,217 @@ function updatePrompt() {
   rlInstance.prompt();
 }
 
+/**
+ * 检测一个字符串是否是有效的 API Key（而非占位符）
+ * 常见占位符：xxxx / your_key_here / sk-xxx 等短于 20 位 / 全相同字符
+ */
+function isValidApiKey(key: string | undefined): boolean {
+  if (!key) return false;
+  if (key.length < 20) return false;          // 太短，必然是占位符
+  if (/^(.)\1+$/.test(key)) return false;     // 全是重复字符，如 xxxx
+  if (/your[_-]?/i.test(key)) return false;   // 常见占位符开头
+  return true;
+}
+
+/**
+ * 将 KEY=VALUE 持久化写入 .env 文件
+ * - 已存在的键就地更新
+ * - 不存在的键就追加到文件末尾
+ */
+function persistEnv(key: string, value: string): void {
+  try {
+    let content = fs.existsSync(ENV_FILE) ? fs.readFileSync(ENV_FILE, 'utf-8') : '';
+    const line = `${key}=${value}`;
+    const regex = new RegExp(`^${key}=.*$`, 'm');
+    if (regex.test(content)) {
+      content = content.replace(regex, line);
+    } else {
+      content = content.endsWith('\n') ? content + line + '\n' : content + '\n' + line + '\n';
+    }
+    fs.writeFileSync(ENV_FILE, content, 'utf-8');
+  } catch {
+    // 写入失败静默忽略（不影响主流程）
+  }
+}
+
+/**
+ * 切换供应商：更新 config / client / MODEL_MAX_TOKENS，重新注册记忆工具
+ */
+function switchProvider(name: string): void {
+  const preset = PROVIDERS[name];
+  if (!preset) {
+    printError(`未知供应商: ${name}，支持：${Object.keys(PROVIDERS).join(', ')}`);
+    return;
+  }
+  const prefix = name.replace(/-/g, '_').toUpperCase();
+  const apiKey = process.env[`${prefix}_API_KEY`] || '';
+  if (!isValidApiKey(apiKey)) {
+    printError(`${name} 未配置有效 API Key（请在 .env 中设置 ${prefix}_API_KEY）`);
+    return;
+  }
+  const newModel = process.env[`${prefix}_MODEL`] || preset.defaultModel;
+  config = { provider: name, apiKey, baseURL: preset.baseURL, model: newModel, headers: preset.headers, protocol: preset.protocol };
+  client = createLLMClient(config);
+  MODEL_MAX_TOKENS = getModelContextLimit(config.model);
+  agent.updateClient(client);
+  // 重新注册记忆工具（consolidate_core_memory 依赖 client）
+  const newMemoryTools = createMemoryTools(client, MEMORY_BASE_DIR);
+  newMemoryTools.forEach(({ def, impl, readonly }) => agent.registerTool(def, impl, readonly));
+  const proto = preset.protocol === 'anthropic' ? ' [Anthropic 协议]' : '';
+  printSystem(`✅ 已切换至 ${name}${proto} | 模型：${newModel}`);
+}
+
+/**
+ * TUI 供应商选择器
+ * - 显示所有 provider（包括未配置的）
+ * - 选中未配置的供应商时弹出密镰输入
+ * - 最后一项“修改当前模型”支持臨时改模型名
+ */
+function showProviderPicker(): void {
+  const rl = rlInstance;
+  if (!rl) return;
+
+  // 所有供应商 + 未配置的也展示
+  type ProviderItem = {
+    name: string; model: string; active: boolean;
+    configured: boolean; preset: any; isCustom: boolean;
+  };
+  const providerItems: ProviderItem[] = Object.entries(PROVIDERS).map(([name, preset]) => {
+    const prefix = name.replace(/-/g, '_').toUpperCase();
+    return {
+      name,
+      model: process.env[`${prefix}_MODEL`] || preset.defaultModel,
+      active: name === config.provider,
+            configured: isValidApiKey(process.env[`${prefix}_API_KEY`]),
+      preset,
+      isCustom: false,
+    };
+  });
+  // 最后一项：修改当前模型
+  const items: ProviderItem[] = [
+    ...providerItems,
+    { name: '__custom__', model: config.model, active: false, configured: true, preset: null, isCustom: true },
+  ];
+
+  let selectedIndex = Math.max(0, items.findIndex(p => p.active));
+  const LINES = items.length + 1;
+
+  function render() {
+    const chalk = require('chalk');
+    process.stdout.write('  ' + chalk.gray('\u2191\u2193 选择  Enter 确认  Esc 取消') + '\n');
+    items.forEach((p, i) => {
+      const isSelected = i === selectedIndex;
+      const prefix = isSelected ? chalk.cyan('  \u25b6 ') : '     ';
+      if (p.isCustom) {
+        const label = chalk.yellow('\u270f\ufe0f  修改当前模型') + chalk.gray(`  (${config.model})`);
+        process.stdout.write(prefix + (isSelected ? label : chalk.gray('\u270f\ufe0f  修改当前模型') + chalk.gray(`  (${config.model})`)) + '\n');
+        return;
+      }
+      const dot = p.active ? chalk.green(' \u25cf') : '  ';
+      const badge = p.configured ? '' : chalk.yellow(' [\u672a\u914d\u7f6e]');
+      const nameStr = (p.name as string).padEnd(12);
+      if (isSelected) {
+        process.stdout.write(prefix + dot + ' ' + chalk.cyan.bold(nameStr) + chalk.white(p.model) + badge + '\n');
+      } else if (p.configured) {
+        process.stdout.write(prefix + dot + ' ' + chalk.gray(nameStr) + chalk.gray(p.model) + '\n');
+      } else {
+        process.stdout.write(prefix + dot + ' ' + chalk.dim(nameStr) + chalk.dim(p.model) + badge + '\n');
+      }
+    });
+  }
+
+  function clear() {
+    for (let i = 0; i < LINES; i++) process.stdout.write('\x1b[1A\x1b[2K');
+  }
+
+  process.stdout.write('\r\x1b[K');
+  render();
+
+  rl.pause();
+  process.stdin.resume();
+
+  const handler = (_str: string, key: readline.Key) => {
+    if (!key) return;
+    if (key.name === 'up') {
+      clear(); selectedIndex = (selectedIndex - 1 + items.length) % items.length; render();
+    } else if (key.name === 'down') {
+      clear(); selectedIndex = (selectedIndex + 1) % items.length; render();
+    } else if (key.name === 'return') {
+      cleanup();
+      const selected = items[selectedIndex];
+      if (selected.isCustom) {
+        promptForModel();
+      } else if (!selected.configured) {
+        promptForApiKey(selected.name, selected.preset);
+      } else {
+        switchProvider(selected.name);
+        rl.prompt();
+      }
+    } else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
+      cleanup();
+      rl.prompt();
+    }
+  };
+
+  function cleanup() {
+    clear();
+    process.stdin.removeListener('keypress', handler);
+    (rl as any).line = '';
+    (rl as any).cursor = 0;
+    rl!.resume();
+  }
+
+  /** 选中未配置的供应商：引导输入 API Key 与模型 */
+    function promptForApiKey(providerName: string, preset: any) {
+    const envPrefix = providerName.replace(/-/g, '_').toUpperCase();
+    const divider = '\x1b[90m' + '─'.repeat(40) + '\x1b[0m';
+    process.stdout.write(`\n${divider}\n`);
+    process.stdout.write(`  \x1b[33m\ud83d\udd11 配置 ${providerName}\x1b[0m\n`);
+    process.stdout.write(`  \x1b[90m直接回车取消\x1b[0m\n${divider}\n`);
+    rl!.question(`  API Key > `, (rawKey) => {
+      const apiKey = rawKey.trim();
+      if (!apiKey) { printSystem('\u5df2\u53d6\u6d88'); rl!.prompt(); return; }
+      process.env[`${envPrefix}_API_KEY`] = apiKey;
+      persistEnv(`${envPrefix}_API_KEY`, apiKey);
+
+      const defaultModel = preset?.defaultModel || '';
+      rl!.question(`  \x1b[90m模型名称 (回车使用默认 ${defaultModel}):\x1b[0m `, (modelInput) => {
+        const model = modelInput.trim() || defaultModel;
+        process.env[`${envPrefix}_MODEL`] = model;
+        persistEnv(`${envPrefix}_MODEL`, model);
+        switchProvider(providerName);
+        printSystem(`\x1b[32m\u2714 配置已保存到 .env\x1b[0m`);
+        rl!.prompt();
+      });
+    });
+  }
+
+  /** 修改当前 provider 的模型名 */
+    function promptForModel() {
+    const divider = '\x1b[90m' + '─'.repeat(40) + '\x1b[0m';
+    process.stdout.write(`\n${divider}\n`);
+    process.stdout.write(`  \x1b[33m\u270f\ufe0f  修改模型\x1b[0m  当前: \x1b[36m${config.model}\x1b[0m\n`);
+    process.stdout.write(`  \x1b[90m直接回车取消\x1b[0m\n${divider}\n`);
+    rl!.question(`  新模型名 > `, (modelInput) => {
+      const model = modelInput.trim();
+      if (!model) { printSystem('已取消'); rl!.prompt(); return; }
+      const envPrefix = config.provider.replace(/-/g, '_').toUpperCase();
+      process.env[`${envPrefix}_MODEL`] = model;
+      persistEnv(`${envPrefix}_MODEL`, model);
+      config = { ...config, model };
+      client = createLLMClient(config);
+      MODEL_MAX_TOKENS = getModelContextLimit(config.model);
+      agent.updateClient(client);
+      const newMemoryTools = createMemoryTools(client, MEMORY_BASE_DIR);
+      newMemoryTools.forEach(({ def, impl, readonly }) => agent.registerTool(def, impl, readonly));
+      printSystem(`\u2705 模型已更改为: ${model}，已保存到 .env`);
+      rl!.prompt();
+    });
+  }
+
+  process.stdin.on('keypress', handler);
+}
+
 function handleCommand(cmd: string): boolean {
   switch (cmd.trim()) {
     case '/help':
@@ -316,12 +530,19 @@ function handleCommand(cmd: string): boolean {
       printVoiceModeSwitch(isVoiceMode);
       updatePrompt();
       return true;
+    case '/provider':
+      showProviderPicker();
+      return true;
     case '/exit':
     case '/quit':
       printDivider();
       printSystem('再见！👋');
       process.exit(0);
     default:
+      if (cmd.startsWith('/provider ')) {
+        switchProvider(cmd.slice('/provider '.length).trim());
+        return true;
+      }
       printError(`未知命令: ${cmd}，输入 /help 查看命令列表`);
       return true;
   }

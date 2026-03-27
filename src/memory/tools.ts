@@ -1,5 +1,5 @@
 import { ToolDefinition } from '../tools/types';
-import { DashScopeClient } from '../llm/client';
+import { ILLMClient } from '../llm/types';
 import {
   getCoreMemory,
   saveCoreMemory,
@@ -68,7 +68,7 @@ export const consolidateCoreMemoryDef: ToolDefinition = {
 
 // ─── 工具实现 ─────────────────────────────────────────────────────────────────
 
-export function createMemoryToolImpls(client: DashScopeClient, cwd: string) {
+export function createMemoryToolImpls(client: ILLMClient, cwd: string) {
   /** recall_memory：关键词匹配 coreMemory + 展示最近 lifeMemory 列表 */
   const recallImpl = async (args: { query: string }): Promise<string> => {
     const queryWords = args.query.toLowerCase().split(/\s+/);

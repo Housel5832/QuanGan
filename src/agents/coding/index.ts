@@ -1,5 +1,5 @@
 import { Agent } from '../../agent/agent';
-import { DashScopeClient } from '../../llm/client';
+import { ILLMClient } from '../../llm/types';
 import { createAllCodingTools } from './tools';
 
 /**
@@ -11,7 +11,7 @@ import { createAllCodingTools } from './tools';
  * @param callbacks  可选：工具调用/结果的 TUI 回调，以及路径安全守卫的 confirm 函数
  */
 export function createCodingAgent(
-  client: DashScopeClient,
+    client: ILLMClient,
   workDir: string,
   callbacks?: {
     onToolCall?: (name: string, args: any) => void;

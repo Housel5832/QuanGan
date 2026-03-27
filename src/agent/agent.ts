@@ -1,3 +1,4 @@
+import { ILLMClient } from '../llm/types';
 import { DashScopeClient } from '../llm/client';
 import { ChatMessage } from '../llm/types';
 import { ToolDefinition, ToolCall, ToolResult, ToolRegistry } from '../tools/types';
@@ -6,7 +7,7 @@ import { ToolDefinition, ToolCall, ToolResult, ToolRegistry } from '../tools/typ
  * Agent 配置
  */
 export interface AgentConfig {
-  client: DashScopeClient;
+  client: ILLMClient;
   systemPrompt?: string;
   maxIterations?: number;
   verbose?: boolean;
@@ -27,7 +28,7 @@ export interface AgentConfig {
  * 智能体 - 支持工具调用的对话代理
  */
 export class Agent {
-  private client: DashScopeClient;
+  private client: ILLMClient;
   private tools: Map<string, ToolRegistry & { readonly: boolean }> = new Map();
   /**
    * 单数组存储所有消息（完整历史）
@@ -72,6 +73,13 @@ export class Agent {
    * 注册工具
    * @param readonly 为 true 时该工具在 Plan 模式下也可被调用（读文件、搜索等安全操作）
    */
+  /**
+   * 运行时替换 LLM client（/provider 命令切换供应商时调用）
+   */
+  updateClient(newClient: ILLMClient): void {
+    this.client = newClient;
+  }
+
   registerTool(definition: ToolDefinition, implementation: (args: any) => Promise<string> | string, readonly = false) {
     this.tools.set(definition.function.name, {
       definition,
@@ -140,29 +148,18 @@ export class Agent {
       })
       .join('\n\n');
 
-    const summaryResp = await fetch(
-      `${this.client.config.baseURL}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.client.config.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: this.client.config.model,
-          messages: [
-            { role: 'system', content: '你是一个对话摘要助手，擅长从编程对话中提炼关键信息。' },
-            { role: 'user',   content: `请将以下对话历史压缩成简洁摘要（200字以内），重点保留：已读过的文件路径、做过的代码修改、重要结论。\n\n${summaryPrompt}` },
-          ],
-        }),
-      }
-    );
+    // 调用大模型生成摘要（使用 client.chat 而非硬编码 fetch）
+    const summary = await this.client.chat(
+      [
+        { role: 'system', content: '你是一个对话摘要助手，擅长从编程对话中提炼关键信息。' },
+        { role: 'user',   content: `请将以下对话历史压缩成简洁摄要（200字以内），重点保留：已读过的文件路径、做过的代码修改、重要结论。
 
-    if (!summaryResp.ok) return; // 压缩失败则静默跳过
-
-    const summaryData = await summaryResp.json() as any;
-    const summary: string = summaryData.choices?.[0]?.message?.content ?? '';
+${summaryPrompt}` },
+      ]
+    ).catch(() => '');
     if (!summary) return;
+
+    
 
     // 构造摘要标记节点
     const summaryMsg: ChatMessage = {
@@ -282,9 +279,9 @@ export class Agent {
         this._aborted = false;
         throw new Error('⚡ 已中断');
       }
-
+      
       iteration++;
-
+      
       if (this.verbose) {
         console.log(`\n━━━━ 迭代 ${iteration} ━━━━`);
       }
@@ -292,24 +289,14 @@ export class Agent {
       const tools = this.getToolDefinitions(planOnly);
       // 每次 fetch 前创建新的 AbortController，供 abort() 取消
       this._abortController = new AbortController();
-      let response: Response;
+      
+      let result: import('../llm/types').AgentCallResponse;
       try {
-        response = await fetch(
-          `${this.client.config.baseURL}/chat/completions`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${this.client.config.apiKey}`,
-            },
-            body: JSON.stringify({
-              model: this.client.config.model,
-              messages: this.getLLMMessages(),
-              ...(tools.length > 0 ? { tools } : {}),
-            }),
-            signal: this._abortController.signal,
-          }
-        );
+        result = await this.client.agentCall({
+          messages: this.getLLMMessages(),
+          tools: tools.length > 0 ? tools : undefined,
+          signal: this._abortController.signal,
+        });
       } catch (err: any) {
         // fetch 被 AbortController 取消（ESC 中断）
         if (err.name === 'AbortError' || this._aborted) {
@@ -318,50 +305,41 @@ export class Agent {
         }
         throw err;
       }
-
-      if (!response.ok) {
-        throw new Error(`API 调用失败: ${response.status}`);
-      }
-
-      const data = await response.json() as any;
-      // 记录 token 用量（百炼每次响应都会返回 usage 字段）
-      if (data.usage) {
-        this.lastTokenUsage = {
-          prompt:     data.usage.prompt_tokens     ?? 0,
-          completion: data.usage.completion_tokens ?? 0,
-          total:      data.usage.total_tokens      ?? 0,
-        };
-        // token 超过阈值时自动压缩，下一轮迭代就能用压缩后的 messages
+      
+      const { message, toolCalls, usage } = result;
+      
+      if (usage) {
+        this.lastTokenUsage = usage;
+        // token 超过阀値时自动压缩，下一轮迭代就能用压缩后的 messages
         if (this.lastTokenUsage.total >= this.compressionThreshold) {
           await this.compressContext();
         }
       }
-      const choice = data.choices[0];
-      const message = choice.message;
+      
       // 添加助手回复（同一个数组）
       this.messages.push(message);
-
+      
       // 检查是否需要调用工具
-      if (message.tool_calls && message.tool_calls.length > 0) {
+      if (toolCalls && toolCalls.length > 0) {
         if (this.verbose) {
-          console.log(`💡 模型请求调用 ${message.tool_calls.length} 个工具`);
+          console.log(`💡 模型请求调用 ${toolCalls.length} 个工具`);
         }
-
+      
         // 执行所有工具调用
-        for (const toolCall of message.tool_calls) {
+        for (const toolCall of toolCalls) {
           const toolResult = await this.executeToolCall(toolCall);
           this.messages.push(toolResult as any);
         }
-
+      
         // 继续下一轮迭代
         continue;
       }
-
+      
       // 没有工具调用，返回最终结果
       if (this.verbose) {
         console.log('\n✅ Agent 执行完成');
       }
-
+      
       return message.content || '';
     }
 

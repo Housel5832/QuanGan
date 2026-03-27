@@ -12,6 +12,7 @@
 - 封装百炼（DashScope）大模型调用，兼容 OpenAI 接口规范
 - 支持普通对话 / 流式输出 / 多轮上下文
 - 完整的 Function Calling 循环（工具调用 → 执行 → 回传结果 → 继续推理）
+- **多 Provider 支持**：通过 `ILLMClient` 统一接口抽象，可无缝切换 DashScope（OpenAI 兼容）/ Kimi / Kimi for Coding（Anthropic 协议）等不同厂商模型
 
 ### 🌐 多 Agent 架构（工具型）
 
@@ -55,11 +56,30 @@
 | `run_applescript` | 执行 AppleScript 脚本，自动化控制任意 macOS 应用（搜索歌曲、操作 UI 等） |
 | `browser_action` | Playwright 浏览器自动化（navigate / click / type / 获取页面文本等），登录态持久化保存，首次登录后永久复用 |
 
-内置命令：`/help` `/history` `/tools` `/clear` `/plan` `/exec` `/voice` `/exit`
+内置命令：`/help` `/history` `/tools` `/clear` `/plan` `/exec` `/voice` `/provider` `/exit`
 
 **CLI 快捷交互：**
 - 输入 `/` 弹出命令选择菜单，↑↓ 导航，Enter 确认，ESC 取消
 - Agent 运行中按 `ESC` 立即中断当次调用（基于 AbortController，fetch 请求即时取消）
+
+### 🔀 多 Provider 切换
+
+输入 `/provider` 弹出供应商选择器：
+
+- **一键切换**：所有已配置（且 API Key 有效）的供应商高亮显示，选中即生效
+- **即时配置**：选中未配置的供应商时，直接在终端输入 API Key 和模型名，无需手动改文件
+- **自动持久化**：输入的 Key / 模型名立即写入 `.env`，下次启动无需重新配置
+- **占位符检测**：自动识别 `xxxx`、`your_key_here` 等无效占位符，确保配置真实有效
+- **修改模型**：列表末尾「✏️ 修改当前模型」可随时切换当前供应商的模型
+
+支持的 Provider：
+
+| Provider | 协议 | 默认模型 | 说明 |
+|----------|------|----------|------|
+| `dashscope` | OpenAI 兼容 | `qwen-plus` | 阿里云百炼，默认供应商 |
+| `kimi` | OpenAI 兼容 | `moonshot-v1-8k` | Moonshot AI |
+| `openai` | OpenAI 原生 | `gpt-4o` | OpenAI |
+| `kimi-code` | Anthropic 协议 | `k2p5` | Kimi for Coding，支持 thinking 模式 |
 
 ### 🎤 语音交互模式
 
@@ -215,6 +235,9 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 - [x] `/clear` 归档化（旧对话带时间戳归档保留，不再直接删除）
 - [x] Daily Agent 提示词策略化（移除内联实现细节，提示词只管优先级）
 - [x] Agent 两层记忆系统（coreMemory 长期记忆 + lifeMemory 每日日记，压缩时自动更新，记忆存储在 QuanGan 全局目录，跨项目共享）
+- [x] 多 Provider 支持（DashScope / Kimi / Kimi for Coding / OpenAI）
+- [x] `ILLMClient` 统一接口抽象，支持 OpenAI 兼容和 Anthropic 协议双层客户端
+- [x] `/provider` 命令：TUI 一键切换 Provider，配置即时持久化到 `.env`
 - [ ] 终端输出代码片段显示文件名 + 行号（便于快速定位和复制）
 - [ ] ReAct 推理过程可视化
 - [ ] 更多等你来提 Issue
@@ -225,6 +248,7 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 
 - TypeScript + ts-node
 - 百炼 DashScope API（OpenAI 兼容）
+- Kimi for Coding（Anthropic Messages API 协议，`k2p5` thinking 模式）
 - Qwen3-ASR-Flash（语音识别）
 - 百炼 CosyVoice（cosyvoice-v3.5-plus，WebSocket TTS 语音合成）
 - chalk（终端颜色）

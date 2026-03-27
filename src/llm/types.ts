@@ -1,3 +1,5 @@
+import { ToolDefinition, ToolCall } from '../tools/types';
+
 /**
  * 聊天消息角色
  */
@@ -51,6 +53,53 @@ export interface ChatCompletionResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+}
+
+/**
+ * Chat 可选参数
+ */
+export interface ChatOptions {
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+}
+
+/**
+ * Agent 调用请求（协议无关）
+ * messages 使用 OpenAI-like 格式（含 tool 角色消息）
+ */
+export interface AgentCallRequest {
+  messages: any[];
+  tools?: ToolDefinition[];
+  signal?: AbortSignal;
+}
+
+/**
+ * Agent 调用响应（协议无关）
+ * message 是要追加到历史的 assistant 消息（OpenAI 格式，含 tool_calls 时才有）
+ */
+export interface AgentCallResponse {
+  /** 推入历史的 assistant 消息（role/content/tool_calls） */
+  message: any;
+  /** 提取出的工具调用列表（供 agent 执行） */
+  toolCalls?: ToolCall[];
+  /** token 用量 */
+  usage?: { prompt: number; completion: number; total: number };
+}
+
+/**
+ * 统一 LLM 客户端接口
+ */
+export interface ILLMClient {
+  readonly config: import('../config/llm-config').LLMConfig;
+  /** 简单单次对话（非 agent，无工具） */
+  chat(messages: ChatMessage[], options?: ChatOptions): Promise<string>;
+  /** 流式对话 */
+  chatStream(messages: ChatMessage[], options?: ChatOptions): AsyncGenerator<string, void, unknown>;
+  /** Agent 主循环使用的调用（支持工具、AbortSignal） */
+  agentCall(req: AgentCallRequest): Promise<AgentCallResponse>;
+  /** 快捷单次问答 */
+  ask(question: string, systemPrompt?: string): Promise<string>;
 }
 
 /**

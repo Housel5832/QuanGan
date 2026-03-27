@@ -1,16 +1,20 @@
 import { LLMConfig } from '../config/llm-config';
 import { 
   ChatMessage, 
+  ChatOptions,
   ChatCompletionRequest, 
   ChatCompletionResponse,
-  ChatCompletionChunk 
+  ChatCompletionChunk,
+  ILLMClient,
+  AgentCallRequest,
+  AgentCallResponse,
 } from './types';
 
 /**
  * 通用 LLM 客户端（OpenAI 兼容接口）
  * 支持任意历商：dashscope / kimi / openai / 自定义
  */
-export class LLMClient {
+export class LLMClient implements ILLMClient {
   public readonly config: LLMConfig;
 
   constructor(config: LLMConfig) {
@@ -38,11 +42,7 @@ export class LLMClient {
    */
   async chat(
     messages: ChatMessage[],
-    options?: {
-      temperature?: number;
-      maxTokens?: number;
-      topP?: number;
-    }
+    options?: ChatOptions
   ): Promise<string> {
     const requestBody: ChatCompletionRequest = {
       model: this.config.model,
@@ -58,6 +58,7 @@ export class LLMClient {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.config.apiKey}`,
+        ...this.config.headers,
       },
       body: JSON.stringify(requestBody),
     });
@@ -76,11 +77,7 @@ export class LLMClient {
    */
   async *chatStream(
     messages: ChatMessage[],
-    options?: {
-      temperature?: number;
-      maxTokens?: number;
-      topP?: number;
-    }
+    options?: ChatOptions
   ): AsyncGenerator<string, void, unknown> {
     const requestBody: ChatCompletionRequest = {
       model: this.config.model,
@@ -96,6 +93,7 @@ export class LLMClient {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.config.apiKey}`,
+        ...this.config.headers,
       },
       body: JSON.stringify(requestBody),
     });
@@ -146,6 +144,48 @@ export class LLMClient {
   }
 
   /**
+   * Agent 主循环调用（支持工具 + AbortSignal）
+   * messages 使用 OpenAI-like 格式，返回协议无关的 AgentCallResponse
+   */
+  async agentCall(req: AgentCallRequest): Promise<AgentCallResponse> {
+    const { messages, tools, signal } = req;
+    const body: any = {
+      model: this.config.model,
+      messages,
+      ...(tools && tools.length > 0 ? { tools } : {}),
+    };
+
+    const response = await fetch(`${this.config.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.apiKey}`,
+        ...this.config.headers,
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`API 调用失败: ${response.status}`);
+    }
+
+    const data = await response.json() as any;
+    const message = data.choices[0].message;
+    const toolCalls = message.tool_calls?.length ? message.tool_calls : undefined;
+
+    return {
+      message,
+      toolCalls,
+      usage: data.usage ? {
+        prompt:     data.usage.prompt_tokens     ?? 0,
+        completion: data.usage.completion_tokens ?? 0,
+        total:      data.usage.total_tokens      ?? 0,
+      } : undefined,
+    };
+  }
+
+  /**
    * 简单问答（快捷方法）
    */
   async ask(question: string, systemPrompt?: string): Promise<string> {
@@ -163,3 +203,16 @@ export class LLMClient {
 
 /** 向下兼容别名，现有引用无需修改 */
 export { LLMClient as DashScopeClient };
+
+/**
+ * 根据配置协议创建对应的 LLM 客户端
+ * protocol=anthropic → AnthropicClient
+ * 其他 → LLMClient（OpenAI 兼容）
+ */
+export function createLLMClient(config: import('../config/llm-config').LLMConfig): import('./types').ILLMClient {
+  if (config.protocol === 'anthropic') {
+    const { AnthropicClient } = require('./anthropic-client');
+    return new AnthropicClient(config);
+  }
+  return new LLMClient(config);
+}

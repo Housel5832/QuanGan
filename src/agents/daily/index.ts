@@ -1,5 +1,5 @@
 import { Agent } from '../../agent/agent';
-import { DashScopeClient } from '../../llm/client';
+import { ILLMClient } from '../../llm/types';
 import { ALL_DAILY_TOOLS } from './tools';
 
 const DAILY_SYSTEM_PROMPT = `你是一个日常任务执行助手，擅长帮用户完成各种日常操作。
@@ -66,7 +66,7 @@ ncm-cli search playlist --keyword "关键词" --userInput "搜索xxx"
  * @param callbacks  可选：工具调用/结果的 TUI 回调，供主 Agent 界面展示
  */
 export function createDailyAgent(
-  client: DashScopeClient,
+    client: ILLMClient,
   callbacks?: {
     onToolCall?: (name: string, args: any) => void;
     onToolResult?: (name: string, result: string) => void;

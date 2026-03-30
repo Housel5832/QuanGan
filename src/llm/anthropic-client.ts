@@ -1,12 +1,12 @@
-import { LLMConfig } from '../config/llm-config';
-import { ToolDefinition } from '../tools/types';
+import { LLMConfig } from '../config/llm-config.js';
+import { ToolDefinition } from '../tools/types.js';
 import {
   ChatMessage,
   ChatOptions,
   ILLMClient,
   AgentCallRequest,
   AgentCallResponse,
-} from './types';
+} from './types.js';
 
 /**
  * Anthropic Messages API 客户端

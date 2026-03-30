@@ -1,5 +1,5 @@
 import { execSync } from 'child_process';
-import { ToolDefinition, ToolFunction } from '../../../tools/types';
+import { ToolDefinition, ToolFunction } from '../../../tools/types.js';
 
 /**
  * 工具：在默认浏览器中打开 URL 或执行搜索

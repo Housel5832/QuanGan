@@ -1,4 +1,4 @@
-import { ToolDefinition, ToolCall } from '../tools/types';
+import { ToolDefinition, ToolCall } from '../tools/types.js';
 
 /**
  * 聊天消息角色
@@ -91,7 +91,7 @@ export interface AgentCallResponse {
  * 统一 LLM 客户端接口
  */
 export interface ILLMClient {
-  readonly config: import('../config/llm-config').LLMConfig;
+  readonly config: import('../config/llm-config.js').LLMConfig;
   /** 简单单次对话（非 agent，无工具） */
   chat(messages: ChatMessage[], options?: ChatOptions): Promise<string>;
   /** 流式对话 */

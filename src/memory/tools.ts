@@ -1,12 +1,12 @@
-import { ToolDefinition } from '../tools/types';
-import { ILLMClient } from '../llm/types';
+import { ToolDefinition } from '../tools/types.js';
+import { ILLMClient } from '../llm/types.js';
 import {
   getCoreMemory,
   saveCoreMemory,
   appendLifeMemory,
   getRecentLifeMemories,
   CoreMemoryItem,
-} from './memory-store';
+} from './memory-store.js';
 
 // ─── 工具定义 ─────────────────────────────────────────────────────────────────
 

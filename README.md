@@ -157,7 +157,7 @@ npm run dev
 配置后可在任意目录使用 `quangan` 命令：
 
 ```bash
-echo 'alias quangan="node /path/to/QuanGan/bin/coding-agent.js"' >> ~/.zshrc
+echo 'alias quangan="node /path/to/QuanGan/bin/coding-agent.cjs"' >> ~/.zshrc
 source ~/.zshrc
 
 # 然后去你的项目目录
@@ -178,21 +178,21 @@ src/
 │   ├── coding/      # Coding Agent 工厂 + 工具（read/write/exec 等）
 │   └── daily/       # Daily Agent 工厂 + 工具（open_app/open_url/run_shell/run_applescript/browser_action）
 ├── memory/          # 记忆系统（memory-store.ts 文件 I/O、tools.ts 工具定义）
-├── voice/           # 语音模块（ASR 识别 + TTS 朗读 + 录音）
+├── voice/           # 语音模块（ASR 识别 + TTS 朗读 + 录音 + voice-design 音色定制）
 ├── tools/           # 工具类型定义
 ├── cli/
 │   ├── session-store.ts  # 会话持久化（JSON 文件读写）
-│   ├── display.ts        # TUI 渲染（chalk + spinner）
-│   ├── command-picker.ts # `/` 命令快捷选择菜单
-│   └── index.ts          # 小玉主 Agent 入口
-├── voice/
-│   ├── tts.ts       # CosyVoice WebSocket TTS 合成
-│   ├── asr.ts       # Qwen3-ASR-Flash 语音识别
-│   ├── recorder.ts  # sox 录音控制
-│   └── voice-design.ts  # 交互式音色定制工具
+│   ├── index.ts          # 小玉主 Agent 入口
+│   └── ui/               # Ink 组件层
+│       ├── App.tsx        # 根组件（Static 历史区 + 动态底部）
+│       ├── store.ts       # ChatStore：命令式→响应式桥接
+│       ├── types.ts       # ChatEvent 联合类型
+│       ├── components/    # Header / ChatMessage / ToolCall / ToolResult / SystemMsg / Spinner / TokenBar
+│       ├── pickers/       # CommandPicker（/命令菜单）/ ProviderPicker（供应商切换）
+│       └── utils/         # highlightJson（工具参数语法高亮）
 ├── examples/        # 学习用示例代码
 bin/
-└── coding-agent.js  # 全局启动入口
+└── coding-agent.cjs # 全局启动入口（CJS 包装器，spawn tsx/esm）
 docs/                # 开发日志
 skills/              # 自定义 Skill（dev-log-writer / developer-words-recorder / daily-record）
 .sessions/           # 会话存档（自动生成，已 gitignore）
@@ -238,6 +238,7 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 - [x] 多 Provider 支持（DashScope / Kimi / Kimi for Coding / OpenAI）
 - [x] `ILLMClient` 统一接口抽象，支持 OpenAI 兼容和 Anthropic 协议双层客户端
 - [x] `/provider` 命令：TUI 一键切换 Provider，配置即时持久化到 `.env`
+- [x] CLI UI 迁移至 Ink + Clack（React 组件化 TUI，`<Static>` 历史区 + 动态底部，输入框圆角边框）
 - [ ] 终端输出代码片段显示文件名 + 行号（便于快速定位和复制）
 - [ ] ReAct 推理过程可视化
 - [ ] 更多等你来提 Issue
@@ -246,12 +247,12 @@ skills/              # 自定义 Skill（dev-log-writer / developer-words-record
 
 ## 技术栈
 
-- TypeScript + ts-node
+- TypeScript + tsx（ESM 模式，`node --import tsx/esm`）
 - 百炼 DashScope API（OpenAI 兼容）
 - Kimi for Coding（Anthropic Messages API 协议，`k2p5` thinking 模式）
 - Qwen3-ASR-Flash（语音识别）
 - 百炼 CosyVoice（cosyvoice-v3.5-plus，WebSocket TTS 语音合成）
-- chalk（终端颜色）
+- **Ink**（React-based 终端 UI，组件化渲染）+ **Clack**（交互式流程向导）
 - Node.js 内置 readline / child_process
 - sox（录音，需单独安装）
 

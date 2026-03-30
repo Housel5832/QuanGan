@@ -1,7 +1,7 @@
 import path from 'path';
 import os from 'os';
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
-import { ToolDefinition, ToolFunction } from '../../../tools/types';
+import { ToolDefinition, ToolFunction } from '../../../tools/types.js';
 
 /**
  * 工具：Playwright 浏览器自动化

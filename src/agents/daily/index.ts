@@ -1,6 +1,6 @@
-import { Agent } from '../../agent/agent';
-import { ILLMClient } from '../../llm/types';
-import { ALL_DAILY_TOOLS } from './tools';
+import { Agent } from '../../agent/agent.js';
+import { ILLMClient } from '../../llm/types.js';
+import { ALL_DAILY_TOOLS } from './tools/index.js';
 
 const DAILY_SYSTEM_PROMPT = `你是一个日常任务执行助手，擅长帮用户完成各种日常操作。
 

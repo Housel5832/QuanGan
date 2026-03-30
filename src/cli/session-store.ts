@@ -6,7 +6,7 @@ import crypto from 'crypto';
  * 会话文件存储在 Agent 项目根目录的 .sessions/ 下
  * 以工作目录路径的 hash 作为文件名，确保每个项目独立一份记录
  */
-const SESSIONS_DIR = path.resolve(__dirname, '../../.sessions');
+const SESSIONS_DIR = path.resolve(import.meta.dirname, '../../.sessions');
 
 /**
  * 根据工作目录生成唯一的会话文件路径

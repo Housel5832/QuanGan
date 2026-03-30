@@ -1,4 +1,4 @@
-import { LLMConfig } from '../config/llm-config';
+import { LLMConfig } from '../config/llm-config.js';
 import { 
   ChatMessage, 
   ChatOptions,
@@ -8,7 +8,7 @@ import {
   ILLMClient,
   AgentCallRequest,
   AgentCallResponse,
-} from './types';
+} from './types.js';
 
 /**
  * 通用 LLM 客户端（OpenAI 兼容接口）
@@ -167,7 +167,8 @@ export class LLMClient implements ILLMClient {
     });
 
     if (!response.ok) {
-      throw new Error(`API 调用失败: ${response.status}`);
+      const errorText = await response.text();
+      throw new Error(`API 调用失败: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json() as any;
@@ -209,7 +210,7 @@ export { LLMClient as DashScopeClient };
  * protocol=anthropic → AnthropicClient
  * 其他 → LLMClient（OpenAI 兼容）
  */
-export function createLLMClient(config: import('../config/llm-config').LLMConfig): import('./types').ILLMClient {
+export function createLLMClient(config: import('../config/llm-config.js').LLMConfig): import('./types.js').ILLMClient {
   if (config.protocol === 'anthropic') {
     const { AnthropicClient } = require('./anthropic-client');
     return new AnthropicClient(config);

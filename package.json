@@ -1,16 +1,17 @@
 {
   "name": "QuanGan",
   "version": "1.0.0",
+  "type": "module",
   "description": "QuanGan Agent",
   "main": "dist/index.js",
   "bin": {
-    "coding-agent": "./bin/coding-agent.js"
+    "coding-agent": "./bin/coding-agent.cjs"
   },
   "scripts": {
-    "dev": "ts-node src/examples/basic-usage.ts",
-    "dev:agent": "ts-node src/examples/agent-usage.ts",
-    "cli": "ts-node src/cli/index.ts",
-    "voice-design": "ts-node src/voice/voice-design.ts",
+    "dev": "tsx src/examples/basic-usage.ts",
+    "dev:agent": "tsx src/examples/agent-usage.ts",
+    "cli": "TSX_TSCONFIG_PATH=./tsconfig.json node --import tsx/esm src/cli/index.ts",
+    "voice-design": "tsx src/voice/voice-design.ts",
     "build": "tsc",
     "start": "node dist/examples/basic-usage.js"
   },
@@ -24,14 +25,21 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/react": "^19.2.14",
     "ts-node": "^10.9.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {
+    "@clack/prompts": "^1.1.0",
     "@types/ws": "^8.18.1",
     "chalk": "^4.1.2",
     "dotenv": "^16.0.0",
+    "ink": "^6.8.0",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
     "playwright": "^1.58.2",
+    "react": "^19.2.4",
     "ws": "^8.19.0"
   }
 }

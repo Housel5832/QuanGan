@@ -1,3 +1,3 @@
-export { recordUntilSilence, cleanupAudioFile } from './recorder';
-export { transcribeAudio } from './asr';
-export { speak, speakAsync, stopSpeaking, cleanForSpeech } from './tts';
+export { recordUntilSilence, cleanupAudioFile } from './recorder.js';
+export { transcribeAudio } from './asr.js';
+export { speak, speakAsync, stopSpeaking, cleanForSpeech } from './tts.js';

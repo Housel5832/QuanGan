@@ -1,7 +1,7 @@
-import { ILLMClient } from '../llm/types';
-import { DashScopeClient } from '../llm/client';
-import { ChatMessage } from '../llm/types';
-import { ToolDefinition, ToolCall, ToolResult, ToolRegistry } from '../tools/types';
+import { ILLMClient } from '../llm/types.js';
+import { DashScopeClient } from '../llm/client.js';
+import { ChatMessage } from '../llm/types.js';
+import { ToolDefinition, ToolCall, ToolResult, ToolRegistry } from '../tools/types.js';
 
 /**
  * Agent 配置
@@ -290,7 +290,7 @@ ${summaryPrompt}` },
       // 每次 fetch 前创建新的 AbortController，供 abort() 取消
       this._abortController = new AbortController();
       
-      let result: import('../llm/types').AgentCallResponse;
+      let result: import('../llm/types.js').AgentCallResponse;
       try {
         result = await this.client.agentCall({
           messages: this.getLLMMessages(),

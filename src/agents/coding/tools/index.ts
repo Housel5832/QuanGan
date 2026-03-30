@@ -1,10 +1,10 @@
-import * as readFile from './read-file';
-import * as writeFile from './write-file';
-import * as editFile from './edit-file';
-import * as listDirectory from './list-directory';
-import * as executeCommand from './execute-command';
-import * as searchCode from './search-code';
-import * as verifyCode from './verify-code';
+import * as readFile from './read-file.js';
+import * as writeFile from './write-file.js';
+import * as editFile from './edit-file.js';
+import * as listDirectory from './list-directory.js';
+import * as executeCommand from './execute-command.js';
+import * as searchCode from './search-code.js';
+import * as verifyCode from './verify-code.js';
 
 /**
  * 工厂函数：创建完整的 coding 工具集

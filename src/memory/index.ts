@@ -1,14 +1,14 @@
-import { ILLMClient } from '../llm/types';
+import { ILLMClient } from '../llm/types.js';
 import {
   recallMemoryDef,
   updateLifeMemoryDef,
   consolidateCoreMemoryDef,
   createMemoryToolImpls,
-} from './tools';
+} from './tools.js';
 
-export { getCoreMemory, appendLifeMemory, getRecentLifeMemories, MEMORY_BASE_DIR } from './memory-store';
-export type { CoreMemoryData, CoreMemoryItem } from './memory-store';
-export { createMemoryToolImpls } from './tools';
+export { getCoreMemory, appendLifeMemory, getRecentLifeMemories, MEMORY_BASE_DIR } from './memory-store.js';
+export type { CoreMemoryData, CoreMemoryItem } from './memory-store.js';
+export { createMemoryToolImpls } from './tools.js';
 
 /**
  * 创建所有记忆工具（供主 Agent 注册）

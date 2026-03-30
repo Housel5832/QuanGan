@@ -1,6 +1,6 @@
-import { Agent } from '../../agent/agent';
-import { ILLMClient } from '../../llm/types';
-import { createAllCodingTools } from './tools';
+import { Agent } from '../../agent/agent.js';
+import { ILLMClient } from '../../llm/types.js';
+import { createAllCodingTools } from './tools/index.js';
 
 /**
  * CodingAgent 工厂函数

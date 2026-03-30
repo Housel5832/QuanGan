@@ -1,7 +1,7 @@
 import 'dotenv/config';
-import { loadConfigFromEnv, createConfig } from '../config/llm-config';
-import { DashScopeClient } from '../llm/client';
-import { ChatMessage } from '../llm/types';
+import { loadConfigFromEnv, createConfig } from '../config/llm-config.js';
+import { DashScopeClient } from '../llm/client.js';
+import { ChatMessage } from '../llm/types.js';
 
 /**
  * 示例1: 基础问答

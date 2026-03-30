@@ -2,44 +2,29 @@ import dotenv from 'dotenv';
 import path from 'path';
 import * as fs from 'fs';
 // .env 文件的绝对路径，供持久化写入使用
-const ENV_FILE = path.resolve(__dirname, '../../.env');
+const ENV_FILE = path.resolve(import.meta.dirname, '../../.env');
 // 固定从 Agent 项目自身目录加载 .env，切换工作目录不会影响 Key 读取
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-import * as readline from 'readline';
-import { loadConfigFromEnv, getModelContextLimit, PROVIDERS } from '../config/llm-config';
-import { DashScopeClient, LLMClient, createLLMClient } from '../llm/client';
-import { Agent } from '../agent/agent';
-import { ToolDefinition } from '../tools/types';
-import {
-  printHeader,
-  printSystem,
-  printHelp,
-  printUserMessage,
-  printAssistantMessage,
-  printToolCall,
-  printToolResult,
-  printToolList,
-  printHistory,
-  printDivider,
-  printError,
-  printModeSwitch,
-  printTokenUsage,
-  printVoiceModeSwitch,
-  printRecordingStart,
-  printRecordingDone,
-  printVoiceTranscribed,
-  createSpinner,
-} from './display';
-import { recordUntilSilence, cleanupAudioFile } from '../voice/recorder';
-import { transcribeAudio } from '../voice/asr';
-import { speakAsync, stopSpeaking } from '../voice/tts';
-import { createCodingAgent } from '../agents/coding';
-import { createDailyAgent } from '../agents/daily';
-import { ALL_CODING_TOOLS } from '../agents/coding/tools';
-import { ALL_DAILY_TOOLS } from '../agents/daily/tools';
-import { loadSession, saveSession, clearSession } from './session-store';
-import { startCommandPicker } from './command-picker';
-import { createMemoryTools, getCoreMemory, appendLifeMemory, createMemoryToolImpls, MEMORY_BASE_DIR } from '../memory';
+dotenv.config({ path: path.resolve(import.meta.dirname, '../../.env') });
+
+import React from 'react';
+import { render } from 'ink';
+import { loadConfigFromEnv, getModelContextLimit, PROVIDERS } from '../config/llm-config.js';
+import { createLLMClient } from '../llm/client.js';
+import { Agent } from '../agent/agent.js';
+import { ToolDefinition } from '../tools/types.js';
+import { createCodingAgent } from '../agents/coding/index.js';
+import { createDailyAgent } from '../agents/daily/index.js';
+import { ALL_CODING_TOOLS } from '../agents/coding/tools/index.js';
+import { ALL_DAILY_TOOLS } from '../agents/daily/tools/index.js';
+import { loadSession, saveSession, clearSession } from './session-store.js';
+import { createMemoryTools, getCoreMemory, appendLifeMemory, createMemoryToolImpls, MEMORY_BASE_DIR } from '../memory/index.js';
+import { recordUntilSilence, cleanupAudioFile } from '../voice/recorder.js';
+import { transcribeAudio } from '../voice/asr.js';
+import { speakAsync, stopSpeaking } from '../voice/tts.js';
+import { ChatStore, } from './ui/store.js';
+import { AppMode, } from './ui/types.js';
+import { App, AppCallbacks, setAppRunning, setAppRecording, setAppShowProvider } from './ui/App.js';
+import { ProviderItem } from './ui/pickers/ProviderPicker.js';
 
 // ─── 初始化 ───────────────────────────────────────────────────────────────────
 
@@ -48,26 +33,30 @@ let client = createLLMClient(config);
 let MODEL_MAX_TOKENS = getModelContextLimit(config.model);
 const CWD = process.cwd();
 
+// ─── Store（UI 桥接层）────────────────────────────────────────────────────────
+
+const store = new ChatStore();
+
 // ─── 记忆系统初始化 ──────────────────────────────────────────────────────────
 
-// 读取 coreMemory，启动时注入到系统提示词
-// 注意：记忆属于小玉自身，存储在 QuanGan 项目目录，与用户当前工作目录无关
 const _initCoreMemory = getCoreMemory(MEMORY_BASE_DIR);
 const _memoryContext =
   _initCoreMemory.memories.length > 0
     ? `\n\n## 你的核心记忆\n${_initCoreMemory.memories.map(m => `- [强度:${m.reinforceCount}] ${m.content}`).join('\n')}`
     : '';
 
-// 每次压缩触发 lifeMemory 更新；每 3 次触发一次核心记忆整合
 let _lifeMemoryUpdateCount = 0;
 
-// 子 Agent 工具调用的 TUI 回调（复用主界面的 display 函数）
+// ─── 工具：子 Agent 调用时的 UI 回调 ─────────────────────────────────────────
+
 const subAgentCallbacks = {
-  onToolCall: (name: string, args: any) => printToolCall(name, args),
-  onToolResult: (_name: string, result: string) => printToolResult(result),
+  onToolCall: (name: string, args: any) =>
+    store.push({ type: 'tool-call', name, args }),
+  onToolResult: (_name: string, result: string) =>
+    store.push({ type: 'tool-result', name: _name, result }),
 };
 
-// ─── 工具定义：子 Agent 作为主 Agent 的两个工具 ──────────────────────────────
+// ─── 工具定义：子 Agent ───────────────────────────────────────────────────────
 
 const codingAgentToolDef: ToolDefinition = {
   type: 'function',
@@ -76,12 +65,7 @@ const codingAgentToolDef: ToolDefinition = {
     description: '调用 Coding Agent 完成代码相关任务，例如：阅读/修改/创建代码文件、执行命令、搜索代码、调试程序等',
     parameters: {
       type: 'object',
-      properties: {
-        task: {
-          type: 'string',
-          description: '要完成的代码任务，请尽量详细描述需求和背景',
-        },
-      },
+      properties: { task: { type: 'string', description: '要完成的代码任务，请尽量详细描述需求和背景' } },
       required: ['task'],
     },
   },
@@ -94,30 +78,20 @@ const dailyAgentToolDef: ToolDefinition = {
     description: '调用 Daily Agent 完成日常任务，例如：打开应用、打开网址/搜索、执行系统命令、回答知识性问题等',
     parameters: {
       type: 'object',
-      properties: {
-        task: {
-          type: 'string',
-          description: '要完成的日常任务，请尽量详细描述需求',
-        },
-      },
+      properties: { task: { type: 'string', description: '要完成的日常任务，请尽量详细描述需求' } },
       required: ['task'],
     },
   },
 };
 
-// ─── lifeMemory 异步更新（在压缩时触发） ────────────────────────────────────
+// ─── lifeMemory 异步更新 ─────────────────────────────────────────────────────
 
-/**
- * 将当前会话历史摘要后写入 lifeMemory。
- * 由 onCompressStart 异步触发，静默失败（不影响主流程）。
- */
 async function updateLifeMemoryAsync(): Promise<void> {
   try {
-    // 获取最近未归档的主助手消息（排除 system 消息）
     const history = agent
       .getHistory()
-      .filter(m => !m._archived && m.role !== 'system')
-      .map(m => {
+      .filter((m: any) => !m._archived && m.role !== 'system')
+      .map((m: any) => {
         const role = m.role === 'user' ? '用户' : 'Agent';
         const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
         return `[${role}]: ${content.slice(0, 400)}`;
@@ -132,14 +106,13 @@ async function updateLifeMemoryAsync(): Promise<void> {
     );
 
     const theme = await client.ask(
-      `根据以下摘要，提取一个简短的主题词（3-8字，如“Agent开发”、“音乐播放调试”）：\n\n${summary}`,
+      `根据以下摘要，提取一个简短的主题词（3-8字，如"Agent开发"、"音乐播放调试"）：\n\n${summary}`,
       '只输出主题词，不要其他内容。',
     );
 
     appendLifeMemory(MEMORY_BASE_DIR, theme.trim(), summary);
 
     _lifeMemoryUpdateCount++;
-    // 每 3 次压缩就触发一次核心记忆整合
     if (_lifeMemoryUpdateCount % 3 === 0) {
       const { consolidateImpl } = createMemoryToolImpls(client, MEMORY_BASE_DIR);
       await consolidateImpl();
@@ -149,7 +122,7 @@ async function updateLifeMemoryAsync(): Promise<void> {
   }
 }
 
-// ─── 主 Agent：小玉 ─────────────────────────────────────────────────────
+// ─── 主 Agent：小玉 ──────────────────────────────────────────────────────────
 
 const agent = new Agent({
   client,
@@ -161,7 +134,7 @@ const agent = new Agent({
 
 ## 如何介绍自己
 如果权哥或其他人问你是谁，这样回答（语气自然随意）：
-——“我是小玉，权哥的私人助理。平时帮权哥处理各种大小事，不管是查个东西、操控电脑还是聚在这儿聊天，都行。”
+——"我是小玉，权哥的私人助理。平时帮权哥处理各种大小事，不管是查个东西、操控电脑还是聚在这儿聊天，都行。"
 不要大段列举自己会什么工具或能力，那样会很生硬。
 
 ## 技能与工作方式
@@ -169,7 +142,7 @@ const agent = new Agent({
 - coding_agent：处理代码相关任务（读写文件、执行命令、代码搜索等）
 - daily_agent：处理日常任务（打开应用、网页搜索、系统命令、知识问答等）
 
-��据权哥的需求分析任务类型并调用合适的助手完成。
+根据权哥的需求分析任务类型并调用合适的助手完成。
 如果是简单的聊天或问候，直接回答就好，无需调助手。
 当前工作目录: ${CWD}
 
@@ -180,44 +153,43 @@ const agent = new Agent({
 - 需要了解权哥偏好才能更好回答
 闲聊、简单问答、纯技术问题无需检索记忆。${_memoryContext}`,
   onToolCall: (name, args) => {
-    // 子 Agent 被调用时，展示路由信息
     if (name === 'coding_agent' || name === 'daily_agent') {
       const label = name === 'coding_agent' ? '💻 Coding Agent' : '🌟 Daily Agent';
-      printToolCall(`${label} ← 路由到`, { task: args.task });
+      store.push({ type: 'tool-call', name: `${label} ← 路由到`, args: { task: (args as any).task } });
     } else {
-      printToolCall(name, args);
+      store.push({ type: 'tool-call', name, args });
     }
   },
   onToolResult: (_name, result) => {
-    printToolResult(result);
+    store.push({ type: 'tool-result', name: _name, result });
   },
   onCompressStart: async () => {
-    process.stdout.write(`\n  ${'\'\x1b[33m\''}⏳ 上下文过长，正在压缩历史对话...${'\x1b[0m'}`);
-    // 异步更新 lifeMemory，不阻塞压缩流程
+    store.push({ type: 'system', content: '⏳ 上下文过长，正在压缩历史对话...' });
     updateLifeMemoryAsync().catch(() => {});
   },
   onCompress: (before, after) => {
-    process.stdout.write('\r' + ' '.repeat(50) + '\r');
-    printSystem(`♻️  上下文已自动压缩（${before} → ${after} 条消息），旧对话已生成摘要保留`);
+    store.push({ type: 'system', content: `♻️  上下文已自动压缩（${before} → ${after} 条消息），旧对话已生成摘要保留` });
   },
 });
 
-// 注册 coding_agent 工具：每次调用新建 CodingAgent 实例（无状态）
+// 注册子 Agent 工具
 agent.registerTool(codingAgentToolDef, async (args: { task: string }) => {
   const codingAgent = createCodingAgent(client, CWD, {
     ...subAgentCallbacks,
-    confirm: makeConfirmFn(),
+    confirm: (msg: string) => new Promise(resolve => {
+      store.push({ type: 'system', content: `⚠️  安全确认: ${msg} (自动拒绝)` });
+      resolve(false);
+    }),
   });
   return await codingAgent.run(args.task);
 });
 
-// 注册 daily_agent 工具：每次调用新建 DailyAgent 实例（无状态）
 agent.registerTool(dailyAgentToolDef, async (args: { task: string }) => {
   const dailyAgent = createDailyAgent(client, subAgentCallbacks);
   return await dailyAgent.run(args.task);
 });
 
-// 注册记忆工具：recall_memory / update_life_memory / consolidate_core_memory
+// 注册记忆工具
 const memoryTools = createMemoryTools(client, MEMORY_BASE_DIR);
 memoryTools.forEach(({ def, impl, readonly }) => agent.registerTool(def, impl, readonly));
 
@@ -228,74 +200,16 @@ if (previousMessages.length > 0) {
   agent.loadMessages(previousMessages);
 }
 
-// ─── 命令处理 ─────────────────────────────────────────────────────────────────
+// ─── 工具函数 ─────────────────────────────────────────────────────────────────
 
-// Plan 模式标志：true 时 Agent 只规划不执行工具
-let isPlanMode = false;
-// Voice 模式标志：true 时按 Enter 开始录音，Agent 回复自动 TTS
-let isVoiceMode = false;
-// Agent 运行中标志（ESC 中断时使用）
-let isAgentRunning = false;
-// 当前正在运行的 spinner（按 ESC 时需要立即停止并给出反馈）
-let currentSpinner: ReturnType<typeof createSpinner> | null = null;
-
-// readline 实例（在 handleCommand 中需要访问以更新 prompt）
-let rlInstance: ReturnType<typeof readline.createInterface> | null = null;
-
-/**
- * 路径安全守卫：当 execute_command 检测到越界路径时，在终端询问用户 y/n
- * 通过闭包捕获 rlInstance，在 main() 设置好 rl 之后调用时自动生效
- */
-function makeConfirmFn(): (msg: string) => Promise<boolean> {
-  return (msg: string) =>
-    new Promise(resolve => {
-      const rl = rlInstance;
-      if (!rl) { resolve(false); return; }
-
-      rl.pause();
-      process.stdout.write(
-        `\n\x1b[33m⚠️  安全确认\x1b[0m\n${msg}\n\x1b[33m确认执行？\x1b[0m \x1b[1m[y/N]\x1b[0m `,
-      );
-      process.stdin.once('data', buf => {
-        const answer = buf.toString().trim().toLowerCase();
-        process.stdout.write('\n');
-        rl.resume();
-        resolve(answer === 'y' || answer === 'yes');
-      });
-    });
-}
-
-function updatePrompt() {
-  if (!rlInstance) return;
-  let prompt: string;
-  if (isPlanMode) {
-    prompt = '\x1b[33m[PLAN] >\x1b[0m ';          // 黄色
-  } else if (isVoiceMode) {
-    prompt = '\x1b[35m[🎤 VOICE] Enter=录音 >\x1b[0m ';  // 紫色
-  } else {
-    prompt = '\x1b[32m>\x1b[0m ';                  // 绳色
-  }
-  rlInstance.setPrompt(prompt);
-  rlInstance.prompt();
-}
-
-/**
- * 检测一个字符串是否是有效的 API Key（而非占位符）
- * 常见占位符：xxxx / your_key_here / sk-xxx 等短于 20 位 / 全相同字符
- */
 function isValidApiKey(key: string | undefined): boolean {
   if (!key) return false;
-  if (key.length < 20) return false;          // 太短，必然是占位符
-  if (/^(.)\1+$/.test(key)) return false;     // 全是重复字符，如 xxxx
-  if (/your[_-]?/i.test(key)) return false;   // 常见占位符开头
+  if (key.length < 20) return false;
+  if (/^(.)\1+$/.test(key)) return false;
+  if (/your[_-]?/i.test(key)) return false;
   return true;
 }
 
-/**
- * 将 KEY=VALUE 持久化写入 .env 文件
- * - 已存在的键就地更新
- * - 不存在的键就追加到文件末尾
- */
 function persistEnv(key: string, value: string): void {
   try {
     let content = fs.existsSync(ENV_FILE) ? fs.readFileSync(ENV_FILE, 'utf-8') : '';
@@ -307,24 +221,19 @@ function persistEnv(key: string, value: string): void {
       content = content.endsWith('\n') ? content + line + '\n' : content + '\n' + line + '\n';
     }
     fs.writeFileSync(ENV_FILE, content, 'utf-8');
-  } catch {
-    // 写入失败静默忽略（不影响主流程）
-  }
+  } catch { /* 写入失败静默忽略 */ }
 }
 
-/**
- * 切换供应商：更新 config / client / MODEL_MAX_TOKENS，重新注册记忆工具
- */
 function switchProvider(name: string): void {
   const preset = PROVIDERS[name];
   if (!preset) {
-    printError(`未知供应商: ${name}，支持：${Object.keys(PROVIDERS).join(', ')}`);
+    store.push({ type: 'error', content: `未知供应商: ${name}，支持：${Object.keys(PROVIDERS).join(', ')}` });
     return;
   }
   const prefix = name.replace(/-/g, '_').toUpperCase();
   const apiKey = process.env[`${prefix}_API_KEY`] || '';
   if (!isValidApiKey(apiKey)) {
-    printError(`${name} 未配置有效 API Key（请在 .env 中设置 ${prefix}_API_KEY）`);
+    store.push({ type: 'error', content: `${name} 未配置有效 API Key（请在 .env 中设置 ${prefix}_API_KEY）` });
     return;
   }
   const newModel = process.env[`${prefix}_MODEL`] || preset.defaultModel;
@@ -332,237 +241,49 @@ function switchProvider(name: string): void {
   client = createLLMClient(config);
   MODEL_MAX_TOKENS = getModelContextLimit(config.model);
   agent.updateClient(client);
-  // 重新注册记忆工具（consolidate_core_memory 依赖 client）
+  persistEnv('LLM_PROVIDER', name);
   const newMemoryTools = createMemoryTools(client, MEMORY_BASE_DIR);
   newMemoryTools.forEach(({ def, impl, readonly }) => agent.registerTool(def, impl, readonly));
   const proto = preset.protocol === 'anthropic' ? ' [Anthropic 协议]' : '';
-  printSystem(`✅ 已切换至 ${name}${proto} | 模型：${newModel}`);
+  store.push({ type: 'system', content: `✅ 已切换至 ${name}${proto} | 模型：${newModel}` });
 }
 
-/**
- * TUI 供应商选择器
- * - 显示所有 provider（包括未配置的）
- * - 选中未配置的供应商时弹出密镰输入
- * - 最后一项“修改当前模型”支持臨时改模型名
- */
-function showProviderPicker(): void {
-  const rl = rlInstance;
-  if (!rl) return;
-
-  // 所有供应商 + 未配置的也展示
-  type ProviderItem = {
-    name: string; model: string; active: boolean;
-    configured: boolean; preset: any; isCustom: boolean;
-  };
-  const providerItems: ProviderItem[] = Object.entries(PROVIDERS).map(([name, preset]) => {
+function getProviderItems(): ProviderItem[] {
+  const items: ProviderItem[] = Object.entries(PROVIDERS).map(([name, preset]) => {
     const prefix = name.replace(/-/g, '_').toUpperCase();
     return {
       name,
-      model: process.env[`${prefix}_MODEL`] || preset.defaultModel,
+      model: process.env[`${prefix}_MODEL`] || (preset as any).defaultModel,
       active: name === config.provider,
-            configured: isValidApiKey(process.env[`${prefix}_API_KEY`]),
-      preset,
+      configured: isValidApiKey(process.env[`${prefix}_API_KEY`]),
       isCustom: false,
+      defaultModel: (preset as any).defaultModel,
+      envPrefix: prefix,
     };
   });
   // 最后一项：修改当前模型
-  const items: ProviderItem[] = [
-    ...providerItems,
-    { name: '__custom__', model: config.model, active: false, configured: true, preset: null, isCustom: true },
-  ];
-
-  let selectedIndex = Math.max(0, items.findIndex(p => p.active));
-  const LINES = items.length + 1;
-
-  function render() {
-    const chalk = require('chalk');
-    process.stdout.write('  ' + chalk.gray('\u2191\u2193 选择  Enter 确认  Esc 取消') + '\n');
-    items.forEach((p, i) => {
-      const isSelected = i === selectedIndex;
-      const prefix = isSelected ? chalk.cyan('  \u25b6 ') : '     ';
-      if (p.isCustom) {
-        const label = chalk.yellow('\u270f\ufe0f  修改当前模型') + chalk.gray(`  (${config.model})`);
-        process.stdout.write(prefix + (isSelected ? label : chalk.gray('\u270f\ufe0f  修改当前模型') + chalk.gray(`  (${config.model})`)) + '\n');
-        return;
-      }
-      const dot = p.active ? chalk.green(' \u25cf') : '  ';
-      const badge = p.configured ? '' : chalk.yellow(' [\u672a\u914d\u7f6e]');
-      const nameStr = (p.name as string).padEnd(12);
-      if (isSelected) {
-        process.stdout.write(prefix + dot + ' ' + chalk.cyan.bold(nameStr) + chalk.white(p.model) + badge + '\n');
-      } else if (p.configured) {
-        process.stdout.write(prefix + dot + ' ' + chalk.gray(nameStr) + chalk.gray(p.model) + '\n');
-      } else {
-        process.stdout.write(prefix + dot + ' ' + chalk.dim(nameStr) + chalk.dim(p.model) + badge + '\n');
-      }
-    });
-  }
-
-  function clear() {
-    for (let i = 0; i < LINES; i++) process.stdout.write('\x1b[1A\x1b[2K');
-  }
-
-  process.stdout.write('\r\x1b[K');
-  render();
-
-  rl.pause();
-  process.stdin.resume();
-
-  const handler = (_str: string, key: readline.Key) => {
-    if (!key) return;
-    if (key.name === 'up') {
-      clear(); selectedIndex = (selectedIndex - 1 + items.length) % items.length; render();
-    } else if (key.name === 'down') {
-      clear(); selectedIndex = (selectedIndex + 1) % items.length; render();
-    } else if (key.name === 'return') {
-      cleanup();
-      const selected = items[selectedIndex];
-      if (selected.isCustom) {
-        promptForModel();
-      } else if (!selected.configured) {
-        promptForApiKey(selected.name, selected.preset);
-      } else {
-        switchProvider(selected.name);
-        rl.prompt();
-      }
-    } else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
-      cleanup();
-      rl.prompt();
-    }
-  };
-
-  function cleanup() {
-    clear();
-    process.stdin.removeListener('keypress', handler);
-    (rl as any).line = '';
-    (rl as any).cursor = 0;
-    rl!.resume();
-  }
-
-  /** 选中未配置的供应商：引导输入 API Key 与模型 */
-    function promptForApiKey(providerName: string, preset: any) {
-    const envPrefix = providerName.replace(/-/g, '_').toUpperCase();
-    const divider = '\x1b[90m' + '─'.repeat(40) + '\x1b[0m';
-    process.stdout.write(`\n${divider}\n`);
-    process.stdout.write(`  \x1b[33m\ud83d\udd11 配置 ${providerName}\x1b[0m\n`);
-    process.stdout.write(`  \x1b[90m直接回车取消\x1b[0m\n${divider}\n`);
-    rl!.question(`  API Key > `, (rawKey) => {
-      const apiKey = rawKey.trim();
-      if (!apiKey) { printSystem('\u5df2\u53d6\u6d88'); rl!.prompt(); return; }
-      process.env[`${envPrefix}_API_KEY`] = apiKey;
-      persistEnv(`${envPrefix}_API_KEY`, apiKey);
-
-      const defaultModel = preset?.defaultModel || '';
-      rl!.question(`  \x1b[90m模型名称 (回车使用默认 ${defaultModel}):\x1b[0m `, (modelInput) => {
-        const model = modelInput.trim() || defaultModel;
-        process.env[`${envPrefix}_MODEL`] = model;
-        persistEnv(`${envPrefix}_MODEL`, model);
-        switchProvider(providerName);
-        printSystem(`\x1b[32m\u2714 配置已保存到 .env\x1b[0m`);
-        rl!.prompt();
-      });
-    });
-  }
-
-  /** 修改当前 provider 的模型名 */
-    function promptForModel() {
-    const divider = '\x1b[90m' + '─'.repeat(40) + '\x1b[0m';
-    process.stdout.write(`\n${divider}\n`);
-    process.stdout.write(`  \x1b[33m\u270f\ufe0f  修改模型\x1b[0m  当前: \x1b[36m${config.model}\x1b[0m\n`);
-    process.stdout.write(`  \x1b[90m直接回车取消\x1b[0m\n${divider}\n`);
-    rl!.question(`  新模型名 > `, (modelInput) => {
-      const model = modelInput.trim();
-      if (!model) { printSystem('已取消'); rl!.prompt(); return; }
-      const envPrefix = config.provider.replace(/-/g, '_').toUpperCase();
-      process.env[`${envPrefix}_MODEL`] = model;
-      persistEnv(`${envPrefix}_MODEL`, model);
-      config = { ...config, model };
-      client = createLLMClient(config);
-      MODEL_MAX_TOKENS = getModelContextLimit(config.model);
-      agent.updateClient(client);
-      const newMemoryTools = createMemoryTools(client, MEMORY_BASE_DIR);
-      newMemoryTools.forEach(({ def, impl, readonly }) => agent.registerTool(def, impl, readonly));
-      printSystem(`\u2705 模型已更改为: ${model}，已保存到 .env`);
-      rl!.prompt();
-    });
-  }
-
-  process.stdin.on('keypress', handler);
+  items.push({
+    name: '__custom__',
+    model: config.model,
+    active: false,
+    configured: true,
+    isCustom: true,
+    defaultModel: config.model,
+    envPrefix: '',
+  });
+  return items;
 }
 
-function handleCommand(cmd: string): boolean {
-  switch (cmd.trim()) {
-    case '/help':
-      printHelp();
-      return true;
-    case '/clear': {
-      agent.clearHistory();
-      const archivedFile = clearSession(CWD);
-      console.clear();
-      printHeader(config.model);
-      if (archivedFile) {
-        printSystem(`📦 旧对话已归档：${archivedFile}`);
-      }
-      printSystem('已开启新对话，旧记录保留在 .sessions/ 目录中');
-      return true;
-    }
-    case '/history':
-      printHistory(agent.getHistory());
-      return true;
-    case '/tools': {
-      const codingNames = ALL_CODING_TOOLS.map(t => `  [coding] ${t.def.function.name}`);
-      const dailyNames  = ALL_DAILY_TOOLS.map(t  => `  [daily]  ${t.def.function.name}`);
-      printToolList([...codingNames, ...dailyNames]);
-      return true;
-    }
-    case '/plan':
-      isPlanMode = true;
-      printModeSwitch(true);
-      updatePrompt();
-      return true;
-    case '/exec':
-      isPlanMode = false;
-      printModeSwitch(false);
-      updatePrompt();
-      return true;
-    case '/voice':
-      isVoiceMode = !isVoiceMode;
-      printVoiceModeSwitch(isVoiceMode);
-      updatePrompt();
-      return true;
-    case '/provider':
-      showProviderPicker();
-      return true;
-    case '/exit':
-    case '/quit':
-      printDivider();
-      printSystem('再见！👋');
-      process.exit(0);
-    default:
-      if (cmd.startsWith('/provider ')) {
-        switchProvider(cmd.slice('/provider '.length).trim());
-        return true;
-      }
-      printError(`未知命令: ${cmd}，输入 /help 查看命令列表`);
-      return true;
-  }
-}
+// ─── 当前模式 ─────────────────────────────────────────────────────────────────
 
-// ─── 主入口 ───────────────────────────────────────────────────────────────────
+let currentMode: AppMode = 'text';
+const setMode = (m: AppMode) => { currentMode = m; };
 
-// ─── 公共处理逻辑：文字输入和语音输入共用 ─────────────────────────────────────
+// ─── 命令处理 ─────────────────────────────────────────────────────────────────
 
-/**
- * 将用户消息交给 Agent 处理，并在语音模式下自动朗读回复
- * 文字输入和语音输入共用这一函数，避免重复逻辑
- */
-async function processUserMessage(
-  text: string,
-  rl: ReturnType<typeof readline.createInterface>,
-): Promise<void> {
-  // Plan 模式下在用户消息前注入规划指令，引导 LLM 输出结构化计划
-  const messageToSend = isPlanMode
-    ? `[当前处于规划模式，你只能使用只读工具分析代码，禁止修改任何文件]
+// Plan 模式下前缀注入
+function buildPlanPrefix(text: string): string {
+  return `[当前处于规划模式，你只能使用只读工具分析代码，禁止修改任何文件]
 
 请按以下步骤完成任务：
 1. 使用只读工具（read_file、list_directory、search_code）充分分析相关代码和文件
@@ -575,194 +296,200 @@ Step 2: [具体操作描述]
 
 注意：只输出计划，不要真正修改文件。
 
-用户任务：${text}`
-    : text;
-
-  rl.pause();
-  process.stdin.resume(); // 保持 stdin 流动，使 ESC 按键事件可以被捕获
-  isAgentRunning = true;
-  currentSpinner = createSpinner(`Agent 思考中...  \x1b[2m(Esc 可中断)\x1b[0m`);
-
-  try {
-    const response = await agent.run(messageToSend, isPlanMode);
-    if (currentSpinner) { currentSpinner.stop(); currentSpinner = null; }
-    printAssistantMessage(response);
-    // 展示 token 用量进度条
-    const usage = agent.getTokenUsage();
-    printTokenUsage(usage.total, MODEL_MAX_TOKENS);
-    // 每次回复后自动保存（完整历史含 _archived 标记）
-    saveSession(CWD, agent.getHistory());
-    // 语音模式下自动朗读回复
-    if (isVoiceMode) {
-      speakAsync(response);
-    }
-  } catch (e: any) {
-    if (currentSpinner) { currentSpinner.stop(); currentSpinner = null; }
-    if (e.message === '⚡ 已中断') {
-      printSystem('⚡ 调用已中断，可以继续输入');
-    } else {
-      printError(`调用失败: ${e.message}`);
-    }
-  } finally {
-    isAgentRunning = false;
-  }
-
-  rl.resume();
-  console.log('');
-  rl.prompt();
+用户任务：${text}`;
 }
 
-/**
- * 语音输入处理：录音 → ASR 识别 → 交给 processUserMessage
- */
-async function handleVoiceInput(
-  rl: ReturnType<typeof readline.createInterface>,
-): Promise<void> {
-  rl.pause();
-  // 开始录音前先停止正在进行的朗读，避免录到自己的声音
+function handleCommand(cmd: string): void {
+  switch (cmd.trim()) {
+    case '/help':
+      store.push({ type: 'system', content: '命令：/history /clear /tools /plan /exec /voice /provider /exit' });
+      break;
+    case '/clear': {
+      agent.clearHistory();
+      const archivedFile = clearSession(CWD);
+      store.clear();
+      store.push({ type: 'header', model: config.model });
+      if (archivedFile) store.push({ type: 'system', content: `📦 旧对话已归档：${archivedFile}` });
+      store.push({ type: 'system', content: '已开启新对话，旧记录保留在 .sessions/ 目录中' });
+      break;
+    }
+    case '/history': {
+      const history = agent.getHistory().filter((m: any) => m.role === 'user' || m.role === 'assistant');
+      const maxLen = 200;
+      history.forEach((m: any, idx: number) => {
+        const prefix = m.role === 'user' ? `[${idx + 1}] You` : `[${idx + 1}] Agent`;
+        const content = (m.content || '').slice(0, maxLen) + (m.content?.length > maxLen ? ' ...' : '');
+        store.push({ type: 'system', content: `${prefix}  ${content}` });
+      });
+      if (history.length === 0) store.push({ type: 'system', content: '(暂无对话历史)' });
+      break;
+    }
+    case '/tools': {
+      const names = [
+        ...ALL_CODING_TOOLS.map((t: any) => `[coding] ${t.def.function.name}`),
+        ...ALL_DAILY_TOOLS.map((t: any) => `[daily]  ${t.def.function.name}`),
+      ];
+      names.forEach(n => store.push({ type: 'system', content: `  • ${n}` }));
+      break;
+    }
+    case '/plan':
+      currentMode = 'plan';
+      store.push({ type: 'system', content: '📋 Plan 模式：Agent 只会分析规划，不会执行任何工具' });
+      break;
+    case '/exec':
+      currentMode = 'text';
+      store.push({ type: 'system', content: '⚡ 已切换回执行模式' });
+      break;
+    case '/voice':
+      currentMode = currentMode === 'voice' ? 'text' : 'voice';
+      store.push({ type: 'system', content: currentMode === 'voice' ? '🎤 Voice 模式：按 Enter 开始录音，Agent 回复将自动朗读' : '⌨️  已切换回文字输入模式' });
+      break;
+    case '/provider':
+      setAppShowProvider(store, true);
+      break;
+    case '/exit':
+    case '/quit':
+      stopSpeaking();
+      store.push({ type: 'divider' });
+      store.push({ type: 'system', content: '再见！👋' });
+      setTimeout(() => process.exit(0), 200);
+      break;
+    default:
+      if (cmd.startsWith('/provider ')) {
+        switchProvider(cmd.slice('/provider '.length).trim());
+      } else {
+        store.push({ type: 'error', content: `未知命令: ${cmd}，输入 /help 查看命令列表` });
+      }
+  }
+}
+
+// ─── 消息处理 ─────────────────────────────────────────────────────────────────
+
+async function processMessage(text: string): Promise<void> {
+  const messageToSend = currentMode === 'plan' ? buildPlanPrefix(text) : text;
+
+  store.push({ type: 'user', content: text });
+  setAppRunning(store, true);
+
+  try {
+    const response = await agent.run(messageToSend, currentMode === 'plan');
+    store.push({ type: 'assistant', content: response });
+    const usage = agent.getTokenUsage();
+    store.push({ type: 'token-usage', used: usage.total, max: MODEL_MAX_TOKENS });
+    saveSession(CWD, agent.getHistory());
+    if (currentMode === 'voice') speakAsync(response);
+  } catch (e: any) {
+    if (e.message === '⚡ 已中断') {
+      store.push({ type: 'system', content: '⚡ 调用已中断，可以继续输入' });
+    } else {
+      store.push({ type: 'error', content: `调用失败: ${e.message}` });
+    }
+  } finally {
+    setAppRunning(store, false);
+  }
+}
+
+// ─── 语音输入 ─────────────────────────────────────────────────────────────────
+
+async function handleVoiceInput(): Promise<void> {
   stopSpeaking();
-  printRecordingStart();
+  setAppRecording(store, true);
 
   let audioFile = '';
   try {
     audioFile = await recordUntilSilence();
   } catch (e: any) {
-    printRecordingDone();
-    printError(`录音失败: ${e.message}`);
-    rl.resume();
-    rl.prompt();
+    setAppRecording(store, false);
+    store.push({ type: 'error', content: `录音失败: ${e.message}` });
     return;
   }
 
-  printRecordingDone();
-  const spinner = createSpinner('语音识别中...');
-
+  store.push({ type: 'system', content: '语音识别中...' });
   let text = '';
   try {
     text = await transcribeAudio(audioFile, config.apiKey, config.baseURL);
   } catch (e: any) {
-    spinner.stop();
-    printError(`ASR 失败: ${e.message}`);
+    store.push({ type: 'error', content: `ASR 失败: ${e.message}` });
     cleanupAudioFile(audioFile);
-    rl.resume();
-    rl.prompt();
+    setAppRecording(store, false);
     return;
   } finally {
     cleanupAudioFile(audioFile);
+    setAppRecording(store, false);
   }
 
-  spinner.stop();
-
   if (!text.trim()) {
-    printError('未识别到语音，请重试');
-    rl.resume();
-    rl.prompt();
+    store.push({ type: 'error', content: '未识别到语音，请重试' });
     return;
   }
 
-  printVoiceTranscribed(text);
-  // 复用文字输入的处理流程（含 TTS）
-  await processUserMessage(text, rl);
+  store.push({ type: 'voice-transcribed', text });
+  await processMessage(text);
 }
 
-async function main() {
-  // 打印欢迎界面
-  printHeader(config.model);
-  printSystem('小玉已就绪！权哥有什么需要尽管说。');
-  printSystem(`工作目录: ${CWD}`);
-  printSystem('子 Agent：💻 Coding Agent | 🌟 Daily Agent');
-  if (previousMessages.length > 0) {
-    const userCount = previousMessages.filter((m: any) => m.role === 'user').length;
-    printSystem(`已恢复上次会话（${userCount} 轮对话），输入 /clear 可重新开始`);
-    printHistory(agent.getHistory());
-  }
-  printSystem('输入消息开始对话，/help 查看命令\n');
+// ─── App 回调 ─────────────────────────────────────────────────────────────────
 
-  // 创建 readline 接口
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: '\x1b[32m>\x1b[0m ',
-    terminal: true,
-  });
-  rlInstance = rl;
+const appCallbacks: AppCallbacks = {
+  onMessage: processMessage,
+  onCommand: handleCommand,
+  onVoiceTrigger: handleVoiceInput,
+  onAbort: () => agent.abort(),
+  onSwitchProvider: (name) => switchProvider(name),
+  onConfigureApiKey: (providerName, apiKey, model) => {
+    const envPrefix = providerName.replace(/-/g, '_').toUpperCase();
+    process.env[`${envPrefix}_API_KEY`] = apiKey;
+    persistEnv(`${envPrefix}_API_KEY`, apiKey);
+    process.env[`${envPrefix}_MODEL`] = model;
+    persistEnv(`${envPrefix}_MODEL`, model);
+    switchProvider(providerName);
+    store.push({ type: 'system', content: '✅ 配置已保存到 .env' });
+  },
+  onChangeModel: (newModel) => {
+    const envPrefix = config.provider.replace(/-/g, '_').toUpperCase();
+    process.env[`${envPrefix}_MODEL`] = newModel;
+    persistEnv(`${envPrefix}_MODEL`, newModel);
+    config = { ...config, model: newModel };
+    client = createLLMClient(config);
+    MODEL_MAX_TOKENS = getModelContextLimit(config.model);
+    agent.updateClient(client);
+    const newMemoryTools = createMemoryTools(client, MEMORY_BASE_DIR);
+    newMemoryTools.forEach(({ def, impl, readonly }) => agent.registerTool(def, impl, readonly));
+    store.push({ type: 'system', content: `✅ 模型已更改为: ${newModel}，已保存到 .env` });
+  },
+  getProviderItems,
+};
 
-  // ── 全局按键监听：ESC 中断 Agent + '/' 唤起命令选择器 ────────────────────
-  readline.emitKeypressEvents(process.stdin);
-  process.stdin.on('keypress', (str, key) => {
-    if (!key) return;
+// ─── 启动 ─────────────────────────────────────────────────────────────────────
 
-    // 功能 1： ESC 中断当前 Agent 运行
-    if (key.name === 'escape' && isAgentRunning) {
-      // 立即停止 spinner、展示中断提示
-      if (currentSpinner) { currentSpinner.stop(); currentSpinner = null; }
-      process.stdout.write('\n');
-      printSystem('⚡ 中断中...');
-      agent.abort();
-      return;
-    }
+// 推入初始事件
+store.push({ type: 'header', model: config.model });
+store.push({ type: 'system', content: '小玉已就绪！权哥有什么需要尽管说。' });
+store.push({ type: 'system', content: `工作目录: ${CWD}` });
+store.push({ type: 'system', content: '子 Agent：💻 Coding Agent | 🌟 Daily Agent' });
 
-    // 功能 2： '/' 唤起命令选择器（仅当行内只有 '/' 且 Agent 未运行时）
-    if (str === '/' && !isAgentRunning && rl.line === '/') {
-      startCommandPicker(rl, (cmd) => {
-        if (cmd) {
-          console.log('');
-          handleCommand(cmd);
-          rl.prompt();
-        } else {
-          rl.prompt();
-        }
-      });
-    }
-  });
-
-  rl.prompt();
-
-  rl.on('line', async (input: string) => {
-    const trimmed = input.trim();
-
-    // 空行：语音模式下触发录音，否则忽略
-    if (!trimmed) {
-      if (isVoiceMode) {
-        await handleVoiceInput(rl);
-      } else {
-        rl.prompt();
-      }
-      return;
-    }
-
-    // 处理命令
-    if (trimmed.startsWith('/')) {
-      handleCommand(trimmed);
-      rl.prompt();
-      return;
-    }
-
-    // 打印用户消息
-    printUserMessage(trimmed);
-    // 交给公共处理函数（文字输入路径）
-    await processUserMessage(trimmed, rl);
-  });
-
-  // Ctrl+C 优雅退出
-  rl.on('close', () => {
-    stopSpeaking();  // 退出时立即终止朗读
-    printDivider();
-    printSystem('再见！👋');
-    process.exit(0);
-  });
-
-  // 未捕获异常
-  // SIGINT (Ctrl+C) 时也确保停止朗读
-  process.on('SIGINT', () => {
-    stopSpeaking();
-    process.exit(0);
-  });
-
-  process.on('uncaughtException', (e) => {
-    printError(`未捕获异常: ${e.message}`);
-    rl.prompt();
-  });
+if (previousMessages.length > 0) {
+  const userCount = previousMessages.filter((m: any) => m.role === 'user').length;
+  store.push({ type: 'system', content: `已恢复上次会话（${userCount} 轮对话），输入 /clear 可重新开始` });
 }
+store.push({ type: 'system', content: '输入消息开始对话，/help 查看命令' });
 
-main();
+// 挂载 Ink App
+render(
+  React.createElement(App, {
+    store,
+    model: config.model,
+    mode: currentMode,
+    setMode,
+    callbacks: appCallbacks,
+  })
+);
+
+// Ctrl+C / SIGINT 优雅退出
+process.on('SIGINT', () => {
+  stopSpeaking();
+  process.exit(0);
+});
+
+process.on('uncaughtException', (e) => {
+  store.push({ type: 'error', content: `未捕获异常: ${e.message}` });
+});

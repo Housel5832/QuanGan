@@ -1,8 +1,8 @@
-import * as openApp from './open-app';
-import * as openUrl from './open-url';
-import * as runShell from './run-shell';
-import * as runApplescript from './run-applescript';
-import * as browser from './browser';
+import * as openApp from './open-app.js';
+import * as openUrl from './open-url.js';
+import * as runShell from './run-shell.js';
+import * as runApplescript from './run-applescript.js';
+import * as browser from './browser.js';
 
 /**
  * 所有 daily 工具的集合

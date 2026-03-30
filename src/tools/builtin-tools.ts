@@ -1,4 +1,4 @@
-import { ToolDefinition, ToolFunction } from './types';
+import { ToolDefinition, ToolFunction } from './types.js';
 
 /**
  * 内置工具：获取当前时间

